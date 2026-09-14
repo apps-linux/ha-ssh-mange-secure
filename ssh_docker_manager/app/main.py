@@ -4,6 +4,8 @@ import logging
 import os
 import sys
 
+import aiomqtt
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 import config
@@ -45,7 +47,16 @@ async def run_session(options: dict) -> None:
         options["mqtt"].get("discovery_prefix", "homeassistant"),
         host_id,
     )
-    await mqtt.connect()
+    try:
+        await mqtt.connect()
+    except aiomqtt.MqttError as exc:
+        raise RuntimeError(
+            f"Could not connect to MQTT broker {mqtt_conf['host']}:{mqtt_conf['port']} "
+            f"({exc}). If this is 'Not authorized', the broker is rejecting the "
+            "configured mqtt.username/mqtt.password (or you're connecting anonymously "
+            "to a broker that requires a login) - add/fix a login for this add-on in "
+            "the Mosquitto add-on's configuration and match it in mqtt.username/mqtt.password."
+        ) from exc
 
     conn = None
     docker_mgr = None
