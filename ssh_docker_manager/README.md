@@ -38,8 +38,18 @@ You set these up yourself; the add-on never elevates privileges on its own:
 | `ssh.private_key_file` | Filename under `/share`, only used when `key_mode: upload` |
 | `ssh.private_key_passphrase` | Optional passphrase for the private key |
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) |
-| `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Only used when `broker_mode: external` |
+| `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Required in `broker_mode: external`; optional overrides in `broker_mode: homeassistant` (see below) |
 | `mqtt.discovery_prefix` | HA MQTT discovery prefix, default `homeassistant` |
+
+In `broker_mode: homeassistant`, the add-on prefers the credentials Supervisor
+injects for the Mosquitto add-on. If those aren't present yet (service
+discovery not propagated, older Supervisor versions), it falls back to
+`core-mosquitto:1883` — the fixed internal address every Home Assistant
+install with the Mosquitto add-on installed can reach — using
+`mqtt.username`/`mqtt.password` if you've set them (the Mosquitto add-on's
+default config only allows anonymous connections from Home Assistant's core
+supervisor network, so you may need to add a login for this add-on's account
+in the Mosquitto add-on's configuration).
 
 ## Security notes
 
