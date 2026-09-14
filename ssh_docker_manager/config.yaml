@@ -22,7 +22,7 @@ options:
     private_key_passphrase: ""
   mqtt:
     discovery_prefix: "homeassistant"
-    use_addon_broker: true
+    broker_mode: "homeassistant"
     host: ""
     port: 1883
     username: ""
@@ -38,7 +38,7 @@ schema:
     private_key_passphrase: "password?"
   mqtt:
     discovery_prefix: "str"
-    use_addon_broker: "bool"
+    broker_mode: "list(homeassistant|external)"
     host: "str?"
     port: "port?"
     username: "str?"

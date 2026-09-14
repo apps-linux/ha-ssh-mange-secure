@@ -30,8 +30,8 @@ You set these up yourself; the add-on never elevates privileges on its own:
 | `ssh.key_mode` | `generate` or `existing` |
 | `ssh.private_key` | PEM private key text, only used when `key_mode: existing` |
 | `ssh.private_key_passphrase` | Optional passphrase for the private key |
-| `mqtt.use_addon_broker` | Use the Mosquitto add-on's credentials if present (default) |
-| `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Manual broker, used when `use_addon_broker` is off or no add-on broker is found |
+| `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) |
+| `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Only used when `broker_mode: external` |
 | `mqtt.discovery_prefix` | HA MQTT discovery prefix, default `homeassistant` |
 
 ## Security notes

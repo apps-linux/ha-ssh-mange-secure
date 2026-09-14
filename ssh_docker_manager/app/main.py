@@ -26,11 +26,6 @@ async def run_session(options: dict) -> None:
     ssh_opts = options["ssh"]
     mqtt_conf = config.resolve_mqtt(options)
 
-    if not mqtt_conf["host"]:
-        raise RuntimeError(
-            "No MQTT broker configured and the Mosquitto add-on service was not found."
-        )
-
     key_mode = ssh_opts.get("key_mode", "generate")
     key_path = key_manager.ensure_key(
         key_mode, ssh_opts.get("private_key"), ssh_opts.get("private_key_passphrase")
