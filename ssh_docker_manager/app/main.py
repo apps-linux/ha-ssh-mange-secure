@@ -28,10 +28,7 @@ async def run_session(options: dict) -> None:
 
     key_mode = ssh_opts.get("key_mode", "generate")
     key_path = key_manager.ensure_key(
-        key_mode,
-        ssh_opts.get("private_key"),
-        ssh_opts.get("private_key_file"),
-        ssh_opts.get("private_key_passphrase"),
+        key_mode, ssh_opts.get("private_key"), ssh_opts.get("private_key_passphrase")
     )
 
     if key_mode == "generate":

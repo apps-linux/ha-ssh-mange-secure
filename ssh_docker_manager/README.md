@@ -20,26 +20,33 @@ You set these up yourself; the add-on never elevates privileges on its own:
      add-on, and copy the public key it logs into
      `svc_ha_docker`'s `~/.ssh/authorized_keys`.
    - **Paste an existing key**: set `ssh.key_mode` to `paste` and put the
-     private key text into `ssh.private_key`.
-   - **Upload an existing key**: set `ssh.key_mode` to `upload`, drop the
-     private key file into Home Assistant's `/share` folder (via the Samba
-     add-on, the File Editor add-on, or SCP/SFTP), and set
-     `ssh.private_key_file` to its filename, e.g. `id_ed25519`. The add-on
-     mounts `/share` read-only and copies the key into its own `/data`
-     volume on startup — the original file in `/share` is left untouched.
+     private key text into `ssh.private_key`. The add-on's Configuration tab
+     renders that as a single-line box in its basic form — switch to
+     **Edit in YAML** (top-right of the tab) to paste the full multi-line
+     PEM text comfortably.
+
+   There is no `upload` mode: Home Assistant's add-on configuration screen
+   has no file-picker field type, so a real "choose file" upload isn't
+   possible from here — paste is the only way to bring your own key.
 
 ## Configuration
 
 | Option | Description |
 |---|---|
 | `ssh.host` / `ssh.port` / `ssh.username` | Remote connection details |
-| `ssh.key_mode` | `generate`, `paste`, or `upload` |
+| `ssh.key_mode` | `generate` or `paste` |
 | `ssh.private_key` | PEM private key text, only used when `key_mode: paste` |
-| `ssh.private_key_file` | Filename under `/share`, only used when `key_mode: upload` |
 | `ssh.private_key_passphrase` | Optional passphrase for the private key |
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) |
 | `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Required in `broker_mode: external`; optional overrides in `broker_mode: homeassistant` (see below) |
 | `mqtt.discovery_prefix` | HA MQTT discovery prefix, default `homeassistant` |
+
+Home Assistant's add-on options form always shows every field regardless of
+other selections — it can't hide `private_key` when `key_mode: generate`, or
+the `mqtt.*` broker fields when `broker_mode: homeassistant`. That's a
+platform limitation of the add-on config schema, not something this add-on
+controls. Fields simply say in this table (and in their description text)
+when they're actually used.
 
 In `broker_mode: homeassistant`, the add-on prefers the credentials Supervisor
 injects for the Mosquitto add-on. If those aren't present yet (service

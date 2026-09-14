@@ -1,5 +1,5 @@
 name: "SSH Docker Manager"
-version: "0.2.1"
+version: "0.3.0"
 slug: "ssh_docker_manager"
 description: "Securely manage Docker containers on a remote Linux host over SSH, exposed to Home Assistant via MQTT."
 url: "https://github.com/apps-linux/ha-ssh-mange-secure"
@@ -12,8 +12,6 @@ startup: services
 boot: auto
 services:
   - "mqtt:want"
-map:
-  - share:ro
 options:
   ssh:
     host: ""
@@ -21,7 +19,6 @@ options:
     username: ""
     key_mode: "generate"
     private_key: ""
-    private_key_file: ""
     private_key_passphrase: ""
   mqtt:
     discovery_prefix: "homeassistant"
@@ -36,9 +33,8 @@ schema:
     host: "str"
     port: "port"
     username: "str"
-    key_mode: "list(generate|paste|upload)"
+    key_mode: "list(generate|paste)"
     private_key: "str?"
-    private_key_file: "str?"
     private_key_passphrase: "password?"
   mqtt:
     discovery_prefix: "str"
