@@ -15,20 +15,27 @@ You set these up yourself; the add-on never elevates privileges on its own:
    ```
    The account must log back in (or the SSH connection must be fresh) after
    the group change for it to take effect.
-2. SSH key auth for that account — either:
+2. SSH key auth for that account — pick one:
    - **Generate in the add-on**: leave `ssh.key_mode` as `generate`, start the
      add-on, and copy the public key it logs into
-     `svc_ha_docker`'s `~/.ssh/authorized_keys`; or
-   - **Bring your own key**: set `ssh.key_mode` to `existing` and paste the
-     private key into `ssh.private_key`.
+     `svc_ha_docker`'s `~/.ssh/authorized_keys`.
+   - **Paste an existing key**: set `ssh.key_mode` to `paste` and put the
+     private key text into `ssh.private_key`.
+   - **Upload an existing key**: set `ssh.key_mode` to `upload`, drop the
+     private key file into Home Assistant's `/share` folder (via the Samba
+     add-on, the File Editor add-on, or SCP/SFTP), and set
+     `ssh.private_key_file` to its filename, e.g. `id_ed25519`. The add-on
+     mounts `/share` read-only and copies the key into its own `/data`
+     volume on startup — the original file in `/share` is left untouched.
 
 ## Configuration
 
 | Option | Description |
 |---|---|
 | `ssh.host` / `ssh.port` / `ssh.username` | Remote connection details |
-| `ssh.key_mode` | `generate` or `existing` |
-| `ssh.private_key` | PEM private key text, only used when `key_mode: existing` |
+| `ssh.key_mode` | `generate`, `paste`, or `upload` |
+| `ssh.private_key` | PEM private key text, only used when `key_mode: paste` |
+| `ssh.private_key_file` | Filename under `/share`, only used when `key_mode: upload` |
 | `ssh.private_key_passphrase` | Optional passphrase for the private key |
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) |
 | `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Only used when `broker_mode: external` |

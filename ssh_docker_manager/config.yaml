@@ -12,6 +12,8 @@ startup: services
 boot: auto
 services:
   - "mqtt:want"
+map:
+  - share:ro
 options:
   ssh:
     host: ""
@@ -19,6 +21,7 @@ options:
     username: ""
     key_mode: "generate"
     private_key: ""
+    private_key_file: ""
     private_key_passphrase: ""
   mqtt:
     discovery_prefix: "homeassistant"
@@ -33,8 +36,9 @@ schema:
     host: "str"
     port: "port"
     username: "str"
-    key_mode: "list(generate|existing)"
+    key_mode: "list(generate|paste|upload)"
     private_key: "str?"
+    private_key_file: "str?"
     private_key_passphrase: "password?"
   mqtt:
     discovery_prefix: "str"
