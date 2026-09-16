@@ -4,6 +4,16 @@ All notable changes to the SSH Linux Management add-on are documented here.
 This file itself is picked up and shown in the **Changelog** tab of the
 add-on's page in Home Assistant.
 
+## 0.7.5
+
+### Fixed
+- `monitoring_disk_paths` with the whole value wrapped in quote marks (e.g.
+  `"/, /mnt/data"` typed literally into the field, quotes included) produced
+  broken paths like `"/` that `df` failed on. The parser now strips one
+  layer of surrounding `"..."` or `'...'` from the whole value before
+  splitting on commas. The README's own example was also quietly showing
+  the quoted form, which likely encouraged the mistake — fixed.
+
 ## 0.7.4
 
 ### Docs

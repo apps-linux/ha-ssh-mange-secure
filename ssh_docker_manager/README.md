@@ -109,7 +109,7 @@ button.
 | `servers[].libvirt_enabled` | Discover/control libvirt VMs on this server. Default `false`. |
 | `servers[].libvirt_connect_uri` | libvirt connection URI used on this server, default `qemu:///system` |
 | `servers[].monitoring_enabled` | Publish this server's disk/memory usage sensors. Default `false`. |
-| `servers[].monitoring_disk_paths` | Comma-separated paths on this server whose filesystem usage is reported, e.g. `/, /mnt/data`. Default `/`. A plain string, not a list — see note below. |
+| `servers[].monitoring_disk_paths` | Comma-separated paths on this server whose filesystem usage is reported, e.g. `/, /mnt/data`. Default `/`. A plain string, not a list — see note below. **Do not wrap the value in quote marks** — this is a plain text field, so typing `"/, /mnt/data"` makes the quote characters part of the literal string, producing invalid paths like `"/`. |
 | `servers[].poll_interval` | Seconds between this server's libvirt VM state polls and host monitoring updates (Docker uses the Docker event stream instead, no polling) |
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) — shared by all servers |
 | `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Required in `broker_mode: external`; optional overrides in `broker_mode: homeassistant` (see below) — shared by all servers |
@@ -124,12 +124,18 @@ list nested inside a list-of-objects entry. This was tried and confirmed to
 fail against a live Supervisor instance, so the comma-separated string is
 the actual, working shape, not a fallback.
 
+If the value ends up wrapped in quote marks anyway — a natural mistake,
+since typing `"/, /mnt/data"` into a comma-separated field feels correct —
+the add-on strips one layer of surrounding `"..."` or `'...'` from the
+whole value before parsing it, so that specific mistake is tolerated rather
+than silently producing broken paths like `"/`.
+
 ### Host monitoring
 
 `monitoring_enabled` adds three Memory sensors (Used, Available, Use%) plus
 three Disk sensors (Used, Free, Use%) *per path* in that server's
-`monitoring_disk_paths` — so `"/, /mnt/data"` gives you two full sets of
-disk sensors, named e.g. `Host: Disk Used (/)` and
+`monitoring_disk_paths` — so entering `/, /mnt/data` (no quote marks) gives
+you two full sets of disk sensors, named e.g. `Host: Disk Used (/)` and
 `Host: Disk Used (/mnt/data)`. Each path is queried independently (not
 `df /path1 /path2` in one call), since `df` de-duplicates rows for paths
 that share a filesystem — e.g. `/` and `/home` are often the same
