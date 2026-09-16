@@ -45,7 +45,14 @@ class DockerManager:
         return new_container.id
 
     async def events(self):
-        async for event in self.docker.events.subscribe():
+        # aiodocker's subscribe() returns a ChannelSubscriber, which is not an
+        # async iterator itself - it's a queue consumed with get(), and a None
+        # is published to it when the underlying event stream ends.
+        subscriber = self.docker.events.subscribe()
+        while True:
+            event = await subscriber.get()
+            if event is None:
+                return
             yield event
 
     async def close(self) -> None:
