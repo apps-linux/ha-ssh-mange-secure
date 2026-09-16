@@ -202,3 +202,8 @@ tried and confirmed to fail Supervisor's schema validation (`Invalid list
 for option 'monitoring_disk_paths'`) - that's why it's a comma-separated
 string instead (see the Configuration section above), not a design
 preference.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) — it's also shown in the **Changelog** tab
+of this add-on's page in Home Assistant.
