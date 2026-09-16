@@ -55,11 +55,12 @@ class MqttBridge:
     async def publish_docker_discovery(self, container_id: str, name: str) -> None:
         base = self._resource_topic("docker", container_id)
         unique_prefix = f"{self.host_id}_docker_{container_id[:12]}"
+        display_name = f"Docker: {name}"
         availability_topic = self._availability_topic()
         device = self._device_payload()
 
         switch_config = {
-            "name": name,
+            "name": display_name,
             "unique_id": f"{unique_prefix}_power",
             "state_topic": f"{base}/state",
             "command_topic": f"{base}/set",
@@ -77,7 +78,7 @@ class MqttBridge:
         )
 
         restart_config = {
-            "name": f"{name} Restart",
+            "name": f"{display_name} Restart",
             "unique_id": f"{unique_prefix}_restart",
             "command_topic": f"{base}/restart",
             "availability_topic": availability_topic,
@@ -90,7 +91,7 @@ class MqttBridge:
         )
 
         update_config = {
-            "name": f"{name} Update",
+            "name": f"{display_name} Update",
             "unique_id": f"{unique_prefix}_update",
             "command_topic": f"{base}/update",
             "latest_version_topic": f"{base}/update/latest",
@@ -107,11 +108,12 @@ class MqttBridge:
     async def publish_vm_discovery(self, domain_name: str) -> None:
         base = self._resource_topic("vm", domain_name)
         unique_prefix = f"{self.host_id}_vm_{slugify(domain_name)}"
+        display_name = f"VM: {domain_name}"
         availability_topic = self._availability_topic()
         device = self._device_payload()
 
         switch_config = {
-            "name": domain_name,
+            "name": display_name,
             "unique_id": f"{unique_prefix}_power",
             "state_topic": f"{base}/state",
             "command_topic": f"{base}/set",
@@ -129,7 +131,7 @@ class MqttBridge:
         )
 
         reboot_config = {
-            "name": f"{domain_name} Reboot",
+            "name": f"{display_name} Reboot",
             "unique_id": f"{unique_prefix}_reboot",
             "command_topic": f"{base}/reboot",
             "availability_topic": availability_topic,

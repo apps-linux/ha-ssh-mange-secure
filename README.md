@@ -6,6 +6,7 @@ install the add-on below.
 
 ## Add-ons
 
-- [`ssh_docker_manager`](ssh_docker_manager/README.md) — securely manage
-  Docker containers on a remote Linux host over SSH, exposed to Home
-  Assistant via MQTT.
+- [`ssh_docker_manager`](ssh_docker_manager/README.md) (displayed as
+  **SSH Linux Management**) — securely manage Docker containers and
+  libvirt VMs on a remote Linux host over SSH, exposed to Home Assistant
+  via MQTT.

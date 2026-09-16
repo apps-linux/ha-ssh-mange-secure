@@ -1,4 +1,4 @@
-# SSH Docker Manager
+# SSH Linux Management
 
 Connects to a remote Linux host over SSH and exposes it to Home Assistant via
 MQTT discovery:
@@ -8,6 +8,10 @@ MQTT discovery:
   reboot VMs managed by libvirt/QEMU.
 
 Both are independent toggles; enable either or both. At least one must be on.
+
+Entity names are prefixed with `Docker:` or `VM:` (e.g. `Docker: my-nginx`,
+`VM: ubuntu-vm`) so it's clear which is which when both are enabled on the
+same host.
 
 ## Requirements on the remote host
 
