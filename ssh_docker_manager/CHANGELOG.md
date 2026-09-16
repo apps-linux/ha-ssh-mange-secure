@@ -4,6 +4,13 @@ All notable changes to the SSH Linux Management add-on are documented here.
 This file itself is picked up and shown in the **Changelog** tab of the
 add-on's page in Home Assistant.
 
+## 0.7.4
+
+### Docs
+- Documented exactly where to find a `key_mode: generate` server's public
+  key (the add-on's Log tab, with the actual log line format) — it was
+  previously only vaguely described.
+
 ## 0.7.3
 
 ### Docs

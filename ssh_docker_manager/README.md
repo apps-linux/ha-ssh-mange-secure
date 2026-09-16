@@ -55,9 +55,19 @@ on its own:
    separate protocol, so no extra port or socket forwarding is needed for it.
 2. SSH key auth for that account — pick one per server:
    - **Generate in the add-on**: leave that server's `key_mode` as
-     `generate`, start the add-on, and copy the public key it logs (look
-     for the log line naming that server's host) into
-     `svc_ha_docker`'s `~/.ssh/authorized_keys` on that host.
+     `generate` and start the add-on. Open the add-on's **Log** tab (not
+     Configuration) and look for a line like:
+     ```
+     [192.168.1.101] Add this public key to the remote account's authorized_keys:
+     ssh-ed25519 AAAAC3Nza...
+     ```
+     It logs this on every connection attempt until the key is actually
+     authorized on the remote side (so it can't connect yet), which makes
+     it easy to find near the top of a fresh log. Copy that `ssh-ed25519
+     ...` line into `svc_ha_docker`'s `~/.ssh/authorized_keys` on that host.
+     If nothing shows up at all, the add-on never got past config
+     validation to start a session — fix whatever the Supervisor "Failed to
+     save" error names first, save, then check the Log tab again.
    - **Paste an existing key**: set that server's `key_mode` to `paste` and
      put the private key text into its `private_key` field. The add-on's
      Configuration tab renders that as a single-line box in its basic form
