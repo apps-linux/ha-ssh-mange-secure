@@ -1,7 +1,7 @@
 name: "SSH Linux Management"
-version: "0.6.1"
+version: "0.7.0"
 slug: "ssh_docker_manager"
-description: "Securely manage Docker containers and libvirt VMs on a remote Linux host over SSH, exposed to Home Assistant via MQTT."
+description: "Securely manage Docker containers and libvirt VMs on multiple remote Linux hosts over SSH, exposed to Home Assistant via MQTT."
 url: "https://github.com/apps-linux/ha-ssh-mange-secure"
 arch:
   - aarch64
@@ -13,22 +13,19 @@ boot: auto
 services:
   - "mqtt:want"
 options:
-  docker:
-    enabled: true
-  libvirt:
-    enabled: false
-    connect_uri: "qemu:///system"
-  monitoring:
-    enabled: false
-    disk_paths:
-      - "/"
-  ssh:
-    host: ""
-    port: 22
-    username: ""
-    key_mode: "generate"
-    private_key: ""
-    private_key_passphrase: ""
+  servers:
+    - host: ""
+      port: 22
+      username: ""
+      key_mode: "generate"
+      private_key: ""
+      private_key_passphrase: ""
+      docker_enabled: true
+      libvirt_enabled: false
+      libvirt_connect_uri: "qemu:///system"
+      monitoring_enabled: false
+      monitoring_disk_paths: "/"
+      poll_interval: 30
   mqtt:
     discovery_prefix: "homeassistant"
     broker_mode: "homeassistant"
@@ -36,24 +33,20 @@ options:
     port: 1883
     username: ""
     password: ""
-  poll_interval: 30
 schema:
-  docker:
-    enabled: "bool"
-  libvirt:
-    enabled: "bool"
-    connect_uri: "str"
-  monitoring:
-    enabled: "bool"
-    disk_paths:
-      - "str"
-  ssh:
-    host: "str"
-    port: "port"
-    username: "str"
-    key_mode: "list(generate|paste)"
-    private_key: "str?"
-    private_key_passphrase: "password?"
+  servers:
+    - host: "str"
+      port: "port"
+      username: "str"
+      key_mode: "list(generate|paste)"
+      private_key: "str?"
+      private_key_passphrase: "password?"
+      docker_enabled: "bool"
+      libvirt_enabled: "bool"
+      libvirt_connect_uri: "str"
+      monitoring_enabled: "bool"
+      monitoring_disk_paths: "str"
+      poll_interval: "int(5,300)"
   mqtt:
     discovery_prefix: "str"
     broker_mode: "list(homeassistant|external)"
@@ -61,4 +54,3 @@ schema:
     port: "port?"
     username: "str?"
     password: "password?"
-  poll_interval: "int(5,300)"

@@ -1,12 +1,8 @@
 import json
-import re
 
 import aiomqtt
 
-
-def slugify(value: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_") or "unnamed"
-
+from util import slugify, slugify_path
 
 # key, display label, unit, icon
 MEMORY_SENSORS = (
@@ -21,15 +17,6 @@ DISK_METRICS = (
     ("free", "Disk Free", "GB", "mdi:harddisk"),
     ("use_percent", "Disk Use", "%", "mdi:harddisk"),
 )
-
-
-def slugify_path(path: str) -> str:
-    # slugify("/") collapses to nothing since every character is stripped;
-    # special-case the (very common) root path to a readable "root" instead
-    # of falling through to slugify's generic "unnamed".
-    if path.strip("/") == "":
-        return "root"
-    return slugify(path)
 
 
 def disk_metric_key(path: str, metric: str) -> str:

@@ -14,6 +14,7 @@ from docker_client import DockerManager
 from host_monitor import HostMonitor, bytes_to_gb, percent
 from libvirt_client import LibvirtManager
 from mqtt_client import MqttBridge, disk_metric_key
+from util import parse_disk_paths, slugify
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("ssh_docker_manager")
@@ -21,52 +22,54 @@ log = logging.getLogger("ssh_docker_manager")
 RECONNECT_BACKOFF = [2, 5, 10, 30, 60]
 
 
-async def run_session(options: dict) -> None:
-    ssh_opts = options["ssh"]
-    mqtt_conf = config.resolve_mqtt(options)
+async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: str) -> None:
+    host = server["host"]
+    server_slug = slugify(host)
 
-    docker_enabled = options.get("docker", {}).get("enabled", True)
-    libvirt_opts = options.get("libvirt", {})
-    libvirt_enabled = libvirt_opts.get("enabled", False)
-    libvirt_uri = libvirt_opts.get("connect_uri") or "qemu:///system"
-    monitoring_opts = options.get("monitoring", {})
-    monitoring_enabled = monitoring_opts.get("enabled", False)
-    disk_paths = monitoring_opts.get("disk_paths") or ["/"]
-    poll_interval = options.get("poll_interval", 30)
+    docker_enabled = server.get("docker_enabled", True)
+    libvirt_enabled = server.get("libvirt_enabled", False)
+    libvirt_uri = server.get("libvirt_connect_uri") or "qemu:///system"
+    monitoring_enabled = server.get("monitoring_enabled", False)
+    disk_paths = parse_disk_paths(server.get("monitoring_disk_paths"))
+    poll_interval = server.get("poll_interval", 30)
 
     if not docker_enabled and not libvirt_enabled and not monitoring_enabled:
         raise RuntimeError(
-            "docker.enabled, libvirt.enabled and monitoring.enabled are all false - "
-            "enable at least one."
+            f"Server '{host}': docker_enabled, libvirt_enabled and monitoring_enabled "
+            "are all false - enable at least one."
         )
 
-    key_mode = ssh_opts.get("key_mode", "generate")
+    key_mode = server.get("key_mode", "generate")
     key_path = key_manager.ensure_key(
-        key_mode, ssh_opts.get("private_key"), ssh_opts.get("private_key_passphrase")
+        server_slug, key_mode, server.get("private_key"), server.get("private_key_passphrase")
     )
 
     if key_mode == "generate":
-        pub = key_manager.public_key_line()
+        pub = key_manager.public_key_line(server_slug)
         if pub:
-            log.info("Add this public key to the remote account's authorized_keys:\n%s", pub)
+            log.info(
+                "[%s] Add this public key to the remote account's authorized_keys:\n%s",
+                host,
+                pub,
+            )
 
     mqtt = MqttBridge(
         mqtt_conf["host"],
         mqtt_conf["port"],
         mqtt_conf["username"],
         mqtt_conf["password"],
-        options["mqtt"].get("discovery_prefix", "homeassistant"),
-        ssh_opts["host"],
+        discovery_prefix,
+        host,
     )
     try:
         await mqtt.connect()
     except aiomqtt.MqttError as exc:
         raise RuntimeError(
-            f"Could not connect to MQTT broker {mqtt_conf['host']}:{mqtt_conf['port']} "
-            f"({exc}). If this is 'Not authorized', the broker is rejecting the "
-            "configured mqtt.username/mqtt.password (or you're connecting anonymously "
-            "to a broker that requires a login) - add/fix a login for this add-on in "
-            "the Mosquitto add-on's configuration and match it in mqtt.username/mqtt.password."
+            f"[{host}] Could not connect to MQTT broker {mqtt_conf['host']}:{mqtt_conf['port']} "
+            f"({exc}). If this is 'Not authorized', the broker is rejecting the configured "
+            "MQTT username/password (or you're connecting anonymously to a broker that "
+            "requires a login) - add/fix a login for this add-on in the Mosquitto add-on's "
+            "configuration and match it in the mqtt options."
         ) from exc
 
     conn = None
@@ -74,16 +77,16 @@ async def run_session(options: dict) -> None:
     libvirt_mgr = None
     try:
         conn = await ssh_client.connect(
-            ssh_opts["host"],
-            ssh_opts.get("port", 22),
-            ssh_opts["username"],
+            host,
+            server.get("port", 22),
+            server["username"],
             [key_path],
-            ssh_opts.get("private_key_passphrase"),
+            server.get("private_key_passphrase"),
         )
 
         if docker_enabled:
             version = await ssh_client.verify_docker_access(conn)
-            log.info("Connected. Remote Docker Engine version: %s", version)
+            log.info("[%s] Connected. Remote Docker Engine version: %s", host, version)
 
             _, sock_path = await ssh_client.forward_docker_socket(conn)
             docker_mgr = DockerManager(sock_path)
@@ -91,7 +94,7 @@ async def run_session(options: dict) -> None:
         if libvirt_enabled:
             libvirt_mgr = LibvirtManager(conn, libvirt_uri)
             await libvirt_mgr.verify_access()
-            log.info("Connected. Verified libvirt access via %s", libvirt_uri)
+            log.info("[%s] Connected. Verified libvirt access via %s", host, libvirt_uri)
 
         host_monitor = None
         if monitoring_enabled:
@@ -253,18 +256,47 @@ async def _handle_commands(
             log.exception("Command '%s' failed for %s %s", action, kind, resource_id)
 
 
-async def main() -> None:
-    options = config.load_options()
+async def _server_supervisor(server: dict, mqtt_conf: dict, discovery_prefix: str) -> None:
+    host = server.get("host", "?")
     backoff_idx = 0
     while True:
         try:
-            await run_session(options)
+            await run_server_session(server, mqtt_conf, discovery_prefix)
             backoff_idx = 0
         except Exception:
-            log.exception("Session ended with an error, reconnecting")
+            log.exception("[%s] Session ended with an error, reconnecting", host)
         delay = RECONNECT_BACKOFF[min(backoff_idx, len(RECONNECT_BACKOFF) - 1)]
         backoff_idx += 1
         await asyncio.sleep(delay)
+
+
+async def main() -> None:
+    while True:
+        try:
+            options = config.load_options()
+            servers = options.get("servers") or []
+            mqtt_conf = config.resolve_mqtt(options)
+            discovery_prefix = options.get("mqtt", {}).get("discovery_prefix", "homeassistant")
+
+            if not servers:
+                log.error(
+                    "No servers configured - add at least one entry under 'servers' in "
+                    "the add-on configuration."
+                )
+                await asyncio.sleep(3600)
+                continue
+
+            # Each server runs its own independent, self-reconnecting session; one
+            # server's failure never affects the others.
+            await asyncio.gather(
+                *(
+                    _server_supervisor(server, mqtt_conf, discovery_prefix)
+                    for server in servers
+                )
+            )
+        except Exception:
+            log.exception("Startup failed, retrying")
+            await asyncio.sleep(30)
 
 
 if __name__ == "__main__":
