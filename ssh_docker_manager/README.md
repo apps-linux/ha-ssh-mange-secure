@@ -99,24 +99,17 @@ button.
 | `servers[].libvirt_enabled` | Discover/control libvirt VMs on this server. Default `false`. |
 | `servers[].libvirt_connect_uri` | libvirt connection URI used on this server, default `qemu:///system` |
 | `servers[].monitoring_enabled` | Publish this server's disk/memory usage sensors. Default `false`. |
-| `servers[].monitoring_disk_paths` | Comma-separated paths on this server whose filesystem usage is reported, e.g. `/, /mnt/data`. Default `/`. A plain string, not a list — see note below. |
+| `servers[].monitoring_disk_paths` | List of paths on this server whose filesystem usage is reported, default `["/"]`. Rendered with its own **Add** button, nested inside that server's entry. |
 | `servers[].poll_interval` | Seconds between this server's libvirt VM state polls and host monitoring updates (Docker uses the Docker event stream instead, no polling) |
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) — shared by all servers |
 | `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Required in `broker_mode: external`; optional overrides in `broker_mode: homeassistant` (see below) — shared by all servers |
 | `mqtt.discovery_prefix` | HA MQTT discovery prefix, default `homeassistant` — shared by all servers |
 
-`monitoring_disk_paths` is a comma-separated string rather than its own
-nested list: Home Assistant's add-on config schema reliably supports a list
-of flat, single-level entries (that's exactly what the `servers` list
-itself is) but nesting another list inside each list entry is not something
-that's been verified to render/save correctly in Supervisor's UI, so the
-safer, well-established option was used here instead.
-
 ### Host monitoring
 
 `monitoring_enabled` adds three Memory sensors (Used, Available, Use%) plus
 three Disk sensors (Used, Free, Use%) *per path* in that server's
-`monitoring_disk_paths` — so `"/, /mnt/data"` gives you two full sets of
+`monitoring_disk_paths` — so `["/", "/mnt/data"]` gives you two full sets of
 disk sensors, named e.g. `Host: Disk Used (/)` and
 `Host: Disk Used (/mnt/data)`. Each path is queried independently (not
 `df /path1 /path2` in one call), since `df` de-duplicates rows for paths
@@ -188,12 +181,14 @@ and the GB/percent conversion and sensor publishing are covered against a
 fake monitor, but it hasn't been exercised against a real remote host over
 SSH yet.
 
-Multi-server support is new: per-server key isolation/reuse (each server
-gets its own keypair under `/data/ssh/<slug>`, verified not to collide or
-regenerate on restart) and session isolation (one server's connection
-failures retry independently and don't affect any other server's session)
-are covered by tests, but running two or more *real* servers concurrently
-through this add-on hasn't been exercised yet. The `servers` list-of-objects
-config schema itself is a well-established Supervisor pattern, but its
-actual rendering in your Supervisor version's Configuration tab is worth
-confirming after updating.
+Multi-server support: confirmed working against a live Supervisor instance,
+including the `servers` list's **Add** button in the Configuration tab.
+Per-server key isolation/reuse (each server gets its own keypair under
+`/data/ssh/<slug>`, verified not to collide or regenerate on restart) and
+session isolation (one server's connection failures retry independently and
+don't affect any other server's session) are also covered by tests.
+
+`monitoring_disk_paths` nests one list inside each `servers` entry. This
+wasn't part of what was confirmed above - update and check the Configuration
+tab for an **Add** button under each server's Disk Paths field; if it
+doesn't render that way in your Supervisor version, that's worth reporting.

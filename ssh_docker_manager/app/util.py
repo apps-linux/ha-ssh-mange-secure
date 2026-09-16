@@ -15,8 +15,8 @@ def slugify_path(path: str) -> str:
 
 
 def parse_disk_paths(raw: str | list | None) -> list[str]:
-    """monitoring_disk_paths is a comma-separated string per server entry
-    (see README for why it isn't a nested list), e.g. "/, /mnt/data"."""
+    """monitoring_disk_paths is a nested list per server entry. Also accepts a
+    comma-separated string for robustness (e.g. hand-edited options.json)."""
     if isinstance(raw, list):
         paths = raw
     else:
