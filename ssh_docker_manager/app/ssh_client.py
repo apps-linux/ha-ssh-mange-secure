@@ -14,6 +14,8 @@ LOCAL_DOCKER_SOCK = "/tmp/docker_forward.sock"
 async def connect(
     host: str, port: int, username: str, client_keys: list, passphrase: str | None
 ) -> asyncssh.SSHClientConnection:
+    _migrate_known_hosts()
+
     # known_hosts=None on first run means "accept whatever key the server presents".
     # That first connection is trust-on-first-use, not verified — if this matters for
     # your threat model, confirm the host's fingerprint out-of-band before enabling
@@ -35,9 +37,45 @@ async def connect(
     return conn
 
 
+def _migrate_known_hosts() -> None:
+    """One-time repair for entries written by add-on versions before 0.3.5, which
+    always bracketed the host as "[host]:port" even for the default SSH port (22).
+    asyncssh only matches that bracketed form for non-default ports, so a
+    default-port entry pinned by that bug can never be matched again - rewrite it
+    to the plain "host" form it should have used."""
+    if not os.path.exists(KNOWN_HOSTS_PATH):
+        return
+
+    bad_prefix_suffix = f"]:{asyncssh.DEFAULT_PORT} "
+    changed = False
+    lines = []
+
+    with open(KNOWN_HOSTS_PATH) as f:
+        for line in f:
+            if line.startswith("[") and bad_prefix_suffix in line:
+                bracketed_host, rest = line.split(bad_prefix_suffix, 1)
+                line = f"{bracketed_host[1:]} {rest}"
+                changed = True
+            lines.append(line)
+
+    if changed:
+        with open(KNOWN_HOSTS_PATH, "w") as f:
+            f.writelines(lines)
+        log.warning(
+            "Rewrote known_hosts entries pinned on the default SSH port (22) that "
+            "used the wrong bracketed format from an older add-on version."
+        )
+
+
 async def _pin_host_key(conn: asyncssh.SSHClientConnection, host: str, port: int) -> None:
     remote_key = conn.get_server_host_key()
-    entry = f"[{host}]:{port} {remote_key.export_public_key().decode().strip()}\n"
+    key_line = remote_key.export_public_key().decode().strip()
+    # asyncssh (like OpenSSH) only looks up bracketed "[host]:port" entries for a
+    # non-default port; a default-port (22) connection matches against the plain
+    # "host" form instead, so writing "[host]:22" here would never match on the
+    # very next connection attempt.
+    host_field = host if port == asyncssh.DEFAULT_PORT else f"[{host}]:{port}"
+    entry = f"{host_field} {key_line}\n"
     with open(KNOWN_HOSTS_PATH, "a") as f:
         f.write(entry)
     log.warning("Pinned new host key for %s:%s on first connect", host, port)
