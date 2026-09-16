@@ -1,6 +1,11 @@
 import json
+import re
 
 import aiomqtt
+
+
+def slugify(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_") or "unnamed"
 
 
 class MqttBridge:
@@ -21,8 +26,8 @@ class MqttBridge:
         self.host_id = host_id
         self.client: aiomqtt.Client | None = None
 
-    def _base_topic(self, container_id: str) -> str:
-        return f"ssh_docker_manager/{self.host_id}/{container_id}"
+    def _resource_topic(self, kind: str, resource_id: str) -> str:
+        return f"ssh_docker_manager/{self.host_id}/{kind}/{resource_id}"
 
     def _availability_topic(self) -> str:
         return f"ssh_docker_manager/{self.host_id}/availability"
@@ -30,7 +35,7 @@ class MqttBridge:
     def _device_payload(self) -> dict:
         return {
             "identifiers": [f"ssh_docker_manager_{self.host_id}"],
-            "name": f"Docker host {self.host_id}",
+            "name": f"SSH host {self.host_id}",
             "manufacturer": "ssh_docker_manager",
         }
 
@@ -47,9 +52,9 @@ class MqttBridge:
         if self.client:
             await self.client.__aexit__(None, None, None)
 
-    async def publish_discovery(self, container_id: str, name: str) -> None:
-        base = self._base_topic(container_id)
-        unique_prefix = f"{self.host_id}_{container_id[:12]}"
+    async def publish_docker_discovery(self, container_id: str, name: str) -> None:
+        base = self._resource_topic("docker", container_id)
+        unique_prefix = f"{self.host_id}_docker_{container_id[:12]}"
         availability_topic = self._availability_topic()
         device = self._device_payload()
 
@@ -99,8 +104,47 @@ class MqttBridge:
             retain=True,
         )
 
-    async def publish_state(self, container_id: str, state: str) -> None:
-        await self.client.publish(f"{self._base_topic(container_id)}/state", state, retain=True)
+    async def publish_vm_discovery(self, domain_name: str) -> None:
+        base = self._resource_topic("vm", domain_name)
+        unique_prefix = f"{self.host_id}_vm_{slugify(domain_name)}"
+        availability_topic = self._availability_topic()
+        device = self._device_payload()
+
+        switch_config = {
+            "name": domain_name,
+            "unique_id": f"{unique_prefix}_power",
+            "state_topic": f"{base}/state",
+            "command_topic": f"{base}/set",
+            "payload_on": "start",
+            "payload_off": "shutdown",
+            "state_on": "running",
+            "state_off": "shut off",
+            "availability_topic": availability_topic,
+            "device": device,
+        }
+        await self.client.publish(
+            f"{self.discovery_prefix}/switch/{unique_prefix}/config",
+            json.dumps(switch_config),
+            retain=True,
+        )
+
+        reboot_config = {
+            "name": f"{domain_name} Reboot",
+            "unique_id": f"{unique_prefix}_reboot",
+            "command_topic": f"{base}/reboot",
+            "availability_topic": availability_topic,
+            "device": device,
+        }
+        await self.client.publish(
+            f"{self.discovery_prefix}/button/{unique_prefix}_reboot/config",
+            json.dumps(reboot_config),
+            retain=True,
+        )
+
+    async def publish_state(self, kind: str, resource_id: str, state: str) -> None:
+        await self.client.publish(
+            f"{self._resource_topic(kind, resource_id)}/state", state, retain=True
+        )
 
     async def publish_availability(self, online: bool) -> None:
         await self.client.publish(
@@ -108,6 +152,5 @@ class MqttBridge:
         )
 
     async def subscribe_commands(self) -> None:
-        await self.client.subscribe(f"ssh_docker_manager/{self.host_id}/+/set")
-        await self.client.subscribe(f"ssh_docker_manager/{self.host_id}/+/restart")
-        await self.client.subscribe(f"ssh_docker_manager/{self.host_id}/+/update")
+        # ssh_docker_manager/<host_id>/<kind>/<resource_id>/<action>
+        await self.client.subscribe(f"ssh_docker_manager/{self.host_id}/+/+/+")

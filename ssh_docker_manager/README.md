@@ -1,20 +1,30 @@
 # SSH Docker Manager
 
-Phase 1: connects to a remote Linux host over SSH and exposes its Docker
-containers to Home Assistant via MQTT discovery — start, stop, restart, and
-image updates.
+Connects to a remote Linux host over SSH and exposes it to Home Assistant via
+MQTT discovery:
+- **Docker** (`docker.enabled`, on by default) — start, stop, restart
+  containers, and update images.
+- **libvirt VMs** (`libvirt.enabled`, off by default) — start, shut down, and
+  reboot VMs managed by libvirt/QEMU.
+
+Both are independent toggles; enable either or both. At least one must be on.
 
 ## Requirements on the remote host
 
 You set these up yourself; the add-on never elevates privileges on its own:
 
-1. A dedicated service account (no root):
+1. A dedicated service account (no root), added to the group(s) for whichever
+   feature(s) you enable:
    ```
    useradd -m -s /usr/sbin/nologin svc_ha_docker
-   usermod -aG docker svc_ha_docker
+   usermod -aG docker svc_ha_docker      # needed for docker.enabled
+   usermod -aG libvirt svc_ha_docker     # needed for libvirt.enabled
    ```
    The account must log back in (or the SSH connection must be fresh) after
-   the group change for it to take effect.
+   a group change for it to take effect. For libvirt, `virsh`/`libvirt-clients`
+   must also be installed and `libvirtd` running on the remote host — the
+   add-on talks to it by running `virsh` over the same SSH connection, not a
+   separate protocol, so no extra port or socket forwarding is needed for it.
 2. SSH key auth for that account — pick one:
    - **Generate in the add-on**: leave `ssh.key_mode` as `generate`, start the
      add-on, and copy the public key it logs into
@@ -45,6 +55,9 @@ You set these up yourself; the add-on never elevates privileges on its own:
 
 | Option | Description |
 |---|---|
+| `docker.enabled` | Discover/control Docker containers. Default `true`. |
+| `libvirt.enabled` | Discover/control libvirt VMs. Default `false`. |
+| `libvirt.connect_uri` | libvirt connection URI used on the remote host, default `qemu:///system` |
 | `ssh.host` / `ssh.port` / `ssh.username` | Remote connection details |
 | `ssh.key_mode` | `generate` or `paste` |
 | `ssh.private_key` | PEM private key text, only used when `key_mode: paste` |
@@ -52,6 +65,7 @@ You set these up yourself; the add-on never elevates privileges on its own:
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) |
 | `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Required in `broker_mode: external`; optional overrides in `broker_mode: homeassistant` (see below) |
 | `mqtt.discovery_prefix` | HA MQTT discovery prefix, default `homeassistant` |
+| `poll_interval` | Seconds between libvirt VM state polls (Docker uses the Docker event stream instead, no polling) |
 
 Home Assistant's add-on options form always shows every field regardless of
 other selections — it can't hide `private_key` when `key_mode: generate`, or
@@ -74,8 +88,10 @@ in the Mosquitto add-on's configuration).
 
 - The add-on never requires or requests root on the remote host. Docker
   group membership is effectively root-equivalent on that host (full daemon
-  socket access) — that's an inherent property of managing Docker remotely,
-  not something this add-on can restrict further.
+  socket access), and `libvirt` group membership is similarly powerful
+  (VMs can be configured with arbitrary host device/disk passthrough) —
+  that's an inherent property of managing either remotely, not something
+  this add-on can restrict further.
 - The private key lives only in the add-on's `/data` volume.
 - The host's SSH key is pinned on first connection and verified on every
   connection after that; if you need protection against a compromised first
@@ -84,9 +100,16 @@ in the Mosquitto add-on's configuration).
 
 ## Status
 
-Initial skeleton — architecture in place (SSH transport with Docker socket
-forwarding, MQTT discovery for switch/button/update entities, event-driven
-state updates, reconnect/backoff). Not yet run against a live Home Assistant
-Supervisor, MQTT broker, or Docker host — validate library API details
-(`asyncssh`, `aiodocker`, `aiomqtt`) against a real environment before
-relying on it.
+Docker support (SSH transport with Docker socket forwarding, MQTT discovery,
+event-driven state updates, reconnect/backoff) has been run end-to-end
+against a live Home Assistant Supervisor, MQTT broker, and Docker host, with
+several real bugs found and fixed along the way (see git history).
+
+libvirt support is new: the `virsh` output parser and the MQTT
+discovery/command dispatch/polling logic are covered by targeted tests
+against fakes, but the actual `virsh` invocations over SSH have not been
+exercised against a real libvirtd. Worth validating `libvirt.connect_uri`,
+group permissions, and the start/shutdown/reboot commands against your setup
+before relying on it — if `virsh list --all` output looks different than
+expected (e.g. a very old or very new libvirt version changes the table
+format), the parser in `libvirt_client.py` is the place to look.

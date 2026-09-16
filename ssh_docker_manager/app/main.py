@@ -12,6 +12,7 @@ import config
 import key_manager
 import ssh_client
 from docker_client import DockerManager
+from libvirt_client import LibvirtManager
 from mqtt_client import MqttBridge
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -27,6 +28,17 @@ def host_id_for(host: str) -> str:
 async def run_session(options: dict) -> None:
     ssh_opts = options["ssh"]
     mqtt_conf = config.resolve_mqtt(options)
+
+    docker_enabled = options.get("docker", {}).get("enabled", True)
+    libvirt_opts = options.get("libvirt", {})
+    libvirt_enabled = libvirt_opts.get("enabled", False)
+    libvirt_uri = libvirt_opts.get("connect_uri") or "qemu:///system"
+    poll_interval = options.get("poll_interval", 30)
+
+    if not docker_enabled and not libvirt_enabled:
+        raise RuntimeError(
+            "Both docker.enabled and libvirt.enabled are false - enable at least one."
+        )
 
     key_mode = ssh_opts.get("key_mode", "generate")
     key_path = key_manager.ensure_key(
@@ -60,6 +72,7 @@ async def run_session(options: dict) -> None:
 
     conn = None
     docker_mgr = None
+    libvirt_mgr = None
     try:
         conn = await ssh_client.connect(
             ssh_opts["host"],
@@ -69,29 +82,53 @@ async def run_session(options: dict) -> None:
             ssh_opts.get("private_key_passphrase"),
         )
 
-        version = await ssh_client.verify_docker_access(conn)
-        log.info("Connected. Remote Docker Engine version: %s", version)
+        if docker_enabled:
+            version = await ssh_client.verify_docker_access(conn)
+            log.info("Connected. Remote Docker Engine version: %s", version)
 
-        _, sock_path = await ssh_client.forward_docker_socket(conn)
-        docker_mgr = DockerManager(sock_path)
+            _, sock_path = await ssh_client.forward_docker_socket(conn)
+            docker_mgr = DockerManager(sock_path)
+
+        if libvirt_enabled:
+            libvirt_mgr = LibvirtManager(conn, libvirt_uri)
+            await libvirt_mgr.verify_access()
+            log.info("Connected. Verified libvirt access via %s", libvirt_uri)
 
         await mqtt.publish_availability(True)
 
-        for c in await docker_mgr.list_containers():
-            info = await c.show()
-            name = info["Name"].lstrip("/")
-            await mqtt.publish_discovery(c.id, name)
-            await mqtt.publish_state(c.id, info["State"]["Status"])
+        if docker_mgr:
+            for c in await docker_mgr.list_containers():
+                info = await c.show()
+                name = info["Name"].lstrip("/")
+                await mqtt.publish_docker_discovery(c.id, name)
+                await mqtt.publish_state("docker", c.id, info["State"]["Status"])
+
+        known_vms: set[str] = set()
+        vm_state: dict[str, str] = {}
+        if libvirt_mgr:
+            for domain in await libvirt_mgr.list_domains():
+                name = domain["name"]
+                await mqtt.publish_vm_discovery(name)
+                await mqtt.publish_state("vm", name, domain["state"])
+                known_vms.add(name)
+                vm_state[name] = domain["state"]
 
         await mqtt.subscribe_commands()
 
-        command_task = asyncio.create_task(_handle_commands(mqtt, docker_mgr))
-        events_task = asyncio.create_task(_handle_events(mqtt, docker_mgr))
-        closed_task = asyncio.create_task(conn.wait_closed())
+        tasks = [
+            asyncio.create_task(_handle_commands(mqtt, docker_mgr, libvirt_mgr)),
+            asyncio.create_task(conn.wait_closed()),
+        ]
+        if docker_mgr:
+            tasks.append(asyncio.create_task(_handle_docker_events(mqtt, docker_mgr)))
+        if libvirt_mgr:
+            tasks.append(
+                asyncio.create_task(
+                    _poll_libvirt(mqtt, libvirt_mgr, poll_interval, known_vms, vm_state)
+                )
+            )
 
-        done, pending = await asyncio.wait(
-            [command_task, events_task, closed_task], return_when=asyncio.FIRST_COMPLETED
-        )
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
             task.cancel()
         for task in done:
@@ -107,7 +144,7 @@ async def run_session(options: dict) -> None:
         await mqtt.disconnect()
 
 
-async def _handle_events(mqtt: MqttBridge, docker_mgr: DockerManager) -> None:
+async def _handle_docker_events(mqtt: MqttBridge, docker_mgr: DockerManager) -> None:
     async for event in docker_mgr.events():
         if event.get("Type") != "container":
             continue
@@ -115,30 +152,71 @@ async def _handle_events(mqtt: MqttBridge, docker_mgr: DockerManager) -> None:
         status = event.get("status")
         if not container_id or not status:
             continue
-        await mqtt.publish_state(container_id, status)
+        await mqtt.publish_state("docker", container_id, status)
 
 
-async def _handle_commands(mqtt: MqttBridge, docker_mgr: DockerManager) -> None:
+async def _poll_libvirt(
+    mqtt: MqttBridge,
+    libvirt_mgr: LibvirtManager,
+    poll_interval: int,
+    known_vms: set[str],
+    vm_state: dict[str, str],
+) -> None:
+    while True:
+        await asyncio.sleep(poll_interval)
+
+        domains = await libvirt_mgr.list_domains()
+        seen = set()
+        for domain in domains:
+            name = domain["name"]
+            state = domain["state"]
+            seen.add(name)
+
+            if name not in known_vms:
+                await mqtt.publish_vm_discovery(name)
+                known_vms.add(name)
+
+            if vm_state.get(name) != state:
+                await mqtt.publish_state("vm", name, state)
+                vm_state[name] = state
+
+        for removed in known_vms - seen:
+            vm_state.pop(removed, None)
+        known_vms.intersection_update(seen)
+
+
+async def _handle_commands(
+    mqtt: MqttBridge, docker_mgr: DockerManager | None, libvirt_mgr: LibvirtManager | None
+) -> None:
     async for message in mqtt.client.messages:
         parts = str(message.topic).split("/")
-        # ssh_docker_manager/<host_id>/<container_id>/<action>
-        if len(parts) != 4:
+        # ssh_docker_manager/<host_id>/<kind>/<resource_id>/<action>
+        if len(parts) != 5:
             continue
-        _, _, container_id, action = parts
+        _, _, kind, resource_id, action = parts
         payload = message.payload.decode() if isinstance(message.payload, bytes) else message.payload
 
         try:
-            if action == "set":
-                if payload == "start":
-                    await docker_mgr.start(container_id)
-                elif payload == "stop":
-                    await docker_mgr.stop(container_id)
-            elif action == "restart":
-                await docker_mgr.restart(container_id)
-            elif action == "update":
-                await docker_mgr.update_image(container_id)
+            if kind == "docker" and docker_mgr:
+                if action == "set":
+                    if payload == "start":
+                        await docker_mgr.start(resource_id)
+                    elif payload == "stop":
+                        await docker_mgr.stop(resource_id)
+                elif action == "restart":
+                    await docker_mgr.restart(resource_id)
+                elif action == "update":
+                    await docker_mgr.update_image(resource_id)
+            elif kind == "vm" and libvirt_mgr:
+                if action == "set":
+                    if payload == "start":
+                        await libvirt_mgr.start(resource_id)
+                    elif payload == "shutdown":
+                        await libvirt_mgr.shutdown(resource_id)
+                elif action == "reboot":
+                    await libvirt_mgr.reboot(resource_id)
         except Exception:
-            log.exception("Command '%s' failed for container %s", action, container_id)
+            log.exception("Command '%s' failed for %s %s", action, kind, resource_id)
 
 
 async def main() -> None:
