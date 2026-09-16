@@ -1,5 +1,5 @@
 name: "SSH Linux Management"
-version: "0.7.1"
+version: "0.7.2"
 slug: "ssh_docker_manager"
 description: "Securely manage Docker containers and libvirt VMs on multiple remote Linux hosts over SSH, exposed to Home Assistant via MQTT."
 url: "https://github.com/apps-linux/ha-ssh-mange-secure"
@@ -24,8 +24,7 @@ options:
       libvirt_enabled: false
       libvirt_connect_uri: "qemu:///system"
       monitoring_enabled: false
-      monitoring_disk_paths:
-        - "/"
+      monitoring_disk_paths: "/"
       poll_interval: 30
   mqtt:
     discovery_prefix: "homeassistant"
@@ -46,8 +45,7 @@ schema:
       libvirt_enabled: "bool"
       libvirt_connect_uri: "str"
       monitoring_enabled: "bool"
-      monitoring_disk_paths:
-        - "str"
+      monitoring_disk_paths: "str"
       poll_interval: "int(5,300)"
   mqtt:
     discovery_prefix: "str"

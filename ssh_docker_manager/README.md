@@ -99,17 +99,26 @@ button.
 | `servers[].libvirt_enabled` | Discover/control libvirt VMs on this server. Default `false`. |
 | `servers[].libvirt_connect_uri` | libvirt connection URI used on this server, default `qemu:///system` |
 | `servers[].monitoring_enabled` | Publish this server's disk/memory usage sensors. Default `false`. |
-| `servers[].monitoring_disk_paths` | List of paths on this server whose filesystem usage is reported, default `["/"]`. Rendered with its own **Add** button, nested inside that server's entry. |
+| `servers[].monitoring_disk_paths` | Comma-separated paths on this server whose filesystem usage is reported, e.g. `/, /mnt/data`. Default `/`. A plain string, not a list — see note below. |
 | `servers[].poll_interval` | Seconds between this server's libvirt VM state polls and host monitoring updates (Docker uses the Docker event stream instead, no polling) |
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) — shared by all servers |
 | `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Required in `broker_mode: external`; optional overrides in `broker_mode: homeassistant` (see below) — shared by all servers |
 | `mqtt.discovery_prefix` | HA MQTT discovery prefix, default `homeassistant` — shared by all servers |
 
+`monitoring_disk_paths` is a comma-separated string, not its own nested
+list. A list nested inside each `servers[]` entry fails Home Assistant's
+add-on schema validation with `Invalid list for option
+'monitoring_disk_paths'`, even though the `servers` list itself (a list of
+flat objects) is valid — Supervisor's schema validator doesn't support a
+list nested inside a list-of-objects entry. This was tried and confirmed to
+fail against a live Supervisor instance, so the comma-separated string is
+the actual, working shape, not a fallback.
+
 ### Host monitoring
 
 `monitoring_enabled` adds three Memory sensors (Used, Available, Use%) plus
 three Disk sensors (Used, Free, Use%) *per path* in that server's
-`monitoring_disk_paths` — so `["/", "/mnt/data"]` gives you two full sets of
+`monitoring_disk_paths` — so `"/, /mnt/data"` gives you two full sets of
 disk sensors, named e.g. `Host: Disk Used (/)` and
 `Host: Disk Used (/mnt/data)`. Each path is queried independently (not
 `df /path1 /path2` in one call), since `df` de-duplicates rows for paths
@@ -188,7 +197,8 @@ Per-server key isolation/reuse (each server gets its own keypair under
 session isolation (one server's connection failures retry independently and
 don't affect any other server's session) are also covered by tests.
 
-`monitoring_disk_paths` nests one list inside each `servers` entry. This
-wasn't part of what was confirmed above - update and check the Configuration
-tab for an **Add** button under each server's Disk Paths field; if it
-doesn't render that way in your Supervisor version, that's worth reporting.
+A nested list inside each `servers` entry for `monitoring_disk_paths` was
+tried and confirmed to fail Supervisor's schema validation (`Invalid list
+for option 'monitoring_disk_paths'`) - that's why it's a comma-separated
+string instead (see the Configuration section above), not a design
+preference.

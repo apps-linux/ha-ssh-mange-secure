@@ -15,8 +15,12 @@ def slugify_path(path: str) -> str:
 
 
 def parse_disk_paths(raw: str | list | None) -> list[str]:
-    """monitoring_disk_paths is a nested list per server entry. Also accepts a
-    comma-separated string for robustness (e.g. hand-edited options.json)."""
+    """monitoring_disk_paths is a comma-separated string per server entry.
+    A list nested inside a servers[] entry fails Supervisor's schema
+    validation ("Invalid list for option 'monitoring_disk_paths'") even
+    though the servers list itself is valid, so this can't be a nested
+    list - see README. Also accepts an actual list, for robustness (e.g. a
+    hand-edited options.json)."""
     if isinstance(raw, list):
         paths = raw
     else:
