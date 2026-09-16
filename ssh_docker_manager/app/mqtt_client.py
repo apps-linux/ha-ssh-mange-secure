@@ -8,6 +8,17 @@ def slugify(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_") or "unnamed"
 
 
+# key, display label, unit, icon
+HOST_SENSORS = (
+    ("disk_used", "Disk Used", "GB", "mdi:harddisk"),
+    ("disk_free", "Disk Free", "GB", "mdi:harddisk"),
+    ("disk_use_percent", "Disk Use", "%", "mdi:harddisk"),
+    ("memory_used", "Memory Used", "GB", "mdi:memory"),
+    ("memory_free", "Memory Available", "GB", "mdi:memory"),
+    ("memory_use_percent", "Memory Use", "%", "mdi:memory"),
+)
+
+
 class MqttBridge:
     def __init__(
         self,
@@ -141,6 +152,34 @@ class MqttBridge:
             f"{self.discovery_prefix}/button/{unique_prefix}_reboot/config",
             json.dumps(reboot_config),
             retain=True,
+        )
+
+    async def publish_host_discovery(self) -> None:
+        availability_topic = self._availability_topic()
+        device = self._device_payload()
+        base = f"ssh_docker_manager/{self.host_id}/host"
+
+        for key, label, unit, icon in HOST_SENSORS:
+            unique_id = f"{self.host_id}_host_{key}"
+            config = {
+                "name": f"Host: {label}",
+                "unique_id": unique_id,
+                "state_topic": f"{base}/{key}",
+                "unit_of_measurement": unit,
+                "state_class": "measurement",
+                "icon": icon,
+                "availability_topic": availability_topic,
+                "device": device,
+            }
+            await self.client.publish(
+                f"{self.discovery_prefix}/sensor/{unique_id}/config",
+                json.dumps(config),
+                retain=True,
+            )
+
+    async def publish_host_state(self, key: str, value) -> None:
+        await self.client.publish(
+            f"ssh_docker_manager/{self.host_id}/host/{key}", str(value), retain=True
         )
 
     async def publish_state(self, kind: str, resource_id: str, state: str) -> None:

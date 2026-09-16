@@ -6,8 +6,11 @@ MQTT discovery:
   containers, and update images.
 - **libvirt VMs** (`libvirt.enabled`, off by default) — start, shut down, and
   reboot VMs managed by libvirt/QEMU.
+- **Host monitoring** (`monitoring.enabled`, off by default) — disk and
+  memory usage of the remote host itself, as sensors in GB/%.
 
-Both are independent toggles; enable either or both. At least one must be on.
+All three are independent toggles; enable any combination. At least one must
+be on.
 
 Entity names are prefixed with `Docker:` or `VM:` (e.g. `Docker: my-nginx`,
 `VM: ubuntu-vm`) so it's clear which is which when both are enabled on the
@@ -62,6 +65,8 @@ You set these up yourself; the add-on never elevates privileges on its own:
 | `docker.enabled` | Discover/control Docker containers. Default `true`. |
 | `libvirt.enabled` | Discover/control libvirt VMs. Default `false`. |
 | `libvirt.connect_uri` | libvirt connection URI used on the remote host, default `qemu:///system` |
+| `monitoring.enabled` | Publish host disk/memory usage sensors. Default `false`. |
+| `monitoring.disk_path` | Path on the remote host whose filesystem usage is reported, default `/` |
 | `ssh.host` / `ssh.port` / `ssh.username` | Remote connection details |
 | `ssh.key_mode` | `generate` or `paste` |
 | `ssh.private_key` | PEM private key text, only used when `key_mode: paste` |
@@ -69,7 +74,20 @@ You set these up yourself; the add-on never elevates privileges on its own:
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) |
 | `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Required in `broker_mode: external`; optional overrides in `broker_mode: homeassistant` (see below) |
 | `mqtt.discovery_prefix` | HA MQTT discovery prefix, default `homeassistant` |
-| `poll_interval` | Seconds between libvirt VM state polls (Docker uses the Docker event stream instead, no polling) |
+| `poll_interval` | Seconds between libvirt VM state polls and host monitoring updates (Docker uses the Docker event stream instead, no polling) |
+
+### Host monitoring
+
+`monitoring.enabled` adds six sensors under a `Host:` prefix: Disk Used,
+Disk Free, and Disk Use (all for `monitoring.disk_path`), plus Memory Used,
+Memory Available, and Memory Use. Disk and memory sizes are published as
+plain numbers with `unit_of_measurement: GB` (decimal gigabytes, not GiB) so
+Home Assistant renders them as e.g. `42.7 GB` and keeps them graphable in
+history/statistics — the state itself is never a pre-formatted string like
+`"42.7 GB"`, since that would break numeric graphing. The two "Use" sensors
+are percentages. No extra group membership is needed on the remote host:
+this reads `/proc/meminfo` and runs `df` on `monitoring.disk_path`, both of
+which are readable by any account.
 
 Home Assistant's add-on options form always shows every field regardless of
 other selections — it can't hide `private_key` when `key_mode: generate`, or
@@ -117,3 +135,10 @@ group permissions, and the start/shutdown/reboot commands against your setup
 before relying on it — if `virsh list --all` output looks different than
 expected (e.g. a very old or very new libvirt version changes the table
 format), the parser in `libvirt_client.py` is the place to look.
+
+Host monitoring is also new: `/proc/meminfo` and `df -P -B1` parsing in
+`host_monitor.py` are covered by tests against realistic sample output
+(including the older-kernel fallback when `MemAvailable` isn't reported),
+and the GB/percent conversion and sensor publishing are covered against a
+fake monitor, but it hasn't been exercised against a real remote host over
+SSH yet.

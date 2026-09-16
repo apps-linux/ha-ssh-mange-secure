@@ -12,6 +12,7 @@ import config
 import key_manager
 import ssh_client
 from docker_client import DockerManager
+from host_monitor import HostMonitor, bytes_to_gb, percent
 from libvirt_client import LibvirtManager
 from mqtt_client import MqttBridge
 
@@ -33,11 +34,15 @@ async def run_session(options: dict) -> None:
     libvirt_opts = options.get("libvirt", {})
     libvirt_enabled = libvirt_opts.get("enabled", False)
     libvirt_uri = libvirt_opts.get("connect_uri") or "qemu:///system"
+    monitoring_opts = options.get("monitoring", {})
+    monitoring_enabled = monitoring_opts.get("enabled", False)
+    disk_path = monitoring_opts.get("disk_path") or "/"
     poll_interval = options.get("poll_interval", 30)
 
-    if not docker_enabled and not libvirt_enabled:
+    if not docker_enabled and not libvirt_enabled and not monitoring_enabled:
         raise RuntimeError(
-            "Both docker.enabled and libvirt.enabled are false - enable at least one."
+            "docker.enabled, libvirt.enabled and monitoring.enabled are all false - "
+            "enable at least one."
         )
 
     key_mode = ssh_opts.get("key_mode", "generate")
@@ -94,6 +99,10 @@ async def run_session(options: dict) -> None:
             await libvirt_mgr.verify_access()
             log.info("Connected. Verified libvirt access via %s", libvirt_uri)
 
+        host_monitor = None
+        if monitoring_enabled:
+            host_monitor = HostMonitor(conn, disk_path)
+
         await mqtt.publish_availability(True)
 
         if docker_mgr:
@@ -113,6 +122,10 @@ async def run_session(options: dict) -> None:
                 known_vms.add(name)
                 vm_state[name] = domain["state"]
 
+        if host_monitor:
+            await mqtt.publish_host_discovery()
+            await _publish_host_metrics(mqtt, host_monitor)
+
         await mqtt.subscribe_commands()
 
         tasks = [
@@ -127,6 +140,8 @@ async def run_session(options: dict) -> None:
                     _poll_libvirt(mqtt, libvirt_mgr, poll_interval, known_vms, vm_state)
                 )
             )
+        if host_monitor:
+            tasks.append(asyncio.create_task(_poll_host(mqtt, host_monitor, poll_interval)))
 
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
@@ -183,6 +198,26 @@ async def _poll_libvirt(
         for removed in known_vms - seen:
             vm_state.pop(removed, None)
         known_vms.intersection_update(seen)
+
+
+async def _publish_host_metrics(mqtt: MqttBridge, host_monitor: HostMonitor) -> None:
+    memory = await host_monitor.get_memory()
+    await mqtt.publish_host_state("memory_used", bytes_to_gb(memory["used"]))
+    await mqtt.publish_host_state("memory_free", bytes_to_gb(memory["available"]))
+    await mqtt.publish_host_state(
+        "memory_use_percent", percent(memory["used"], memory["total"])
+    )
+
+    disk = await host_monitor.get_disk()
+    await mqtt.publish_host_state("disk_used", bytes_to_gb(disk["used"]))
+    await mqtt.publish_host_state("disk_free", bytes_to_gb(disk["available"]))
+    await mqtt.publish_host_state("disk_use_percent", percent(disk["used"], disk["total"]))
+
+
+async def _poll_host(mqtt: MqttBridge, host_monitor: HostMonitor, poll_interval: int) -> None:
+    while True:
+        await asyncio.sleep(poll_interval)
+        await _publish_host_metrics(mqtt, host_monitor)
 
 
 async def _handle_commands(
