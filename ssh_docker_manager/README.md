@@ -75,7 +75,7 @@ You set these up yourself; the add-on never elevates privileges on its own:
 | `libvirt.enabled` | Discover/control libvirt VMs. Default `false`. |
 | `libvirt.connect_uri` | libvirt connection URI used on the remote host, default `qemu:///system` |
 | `monitoring.enabled` | Publish host disk/memory usage sensors. Default `false`. |
-| `monitoring.disk_paths` | List of paths on the remote host whose filesystem usage is reported, default `["/"]` |
+| `monitoring.disk_paths` | List of paths on the remote host whose filesystem usage is reported, default `["/"]`. The add-on's Configuration tab (basic form, not just YAML) renders this as a list with a native **Add** button and a remove control per entry, since it's declared as a list in the config schema. |
 | `ssh.host` / `ssh.port` / `ssh.username` | Remote connection details |
 | `ssh.key_mode` | `generate` or `paste` |
 | `ssh.private_key` | PEM private key text, only used when `key_mode: paste` |
