@@ -1,3 +1,4 @@
+import asyncio
 import re
 import shlex
 
@@ -9,9 +10,9 @@ class HostMonitor:
     connection - no agent, no extra port, the same low-footprint approach used
     for Docker (socket forward) and libvirt (virsh over SSH exec)."""
 
-    def __init__(self, conn, disk_path: str):
+    def __init__(self, conn, disk_paths: list[str]):
         self._conn = conn
-        self._disk_path = disk_path
+        self._disk_paths = disk_paths
 
     async def _run(self, command: str) -> str:
         result = await self._conn.run(command, check=False)
@@ -23,9 +24,19 @@ class HostMonitor:
         output = await self._run("cat /proc/meminfo")
         return parse_meminfo(output)
 
-    async def get_disk(self) -> dict:
-        output = await self._run(f"df -P -B1 {shlex.quote(self._disk_path)}")
-        return parse_df(output, self._disk_path)
+    async def get_disk(self, path: str) -> dict:
+        output = await self._run(f"df -P -B1 {shlex.quote(path)}")
+        return parse_df(output, path)
+
+    async def get_disks(self) -> dict[str, dict]:
+        # Each path gets its own `df` call rather than one `df path1 path2 ...`
+        # invocation: GNU df de-duplicates rows for paths sharing a filesystem
+        # (e.g. "/" and "/home" on a single-partition install), which would
+        # break a positional path-to-row mapping. Run them concurrently over
+        # the same SSH connection instead - cheap, since a handful of exec
+        # calls easily fits within one multiplexed session.
+        results = await asyncio.gather(*(self.get_disk(path) for path in self._disk_paths))
+        return dict(zip(self._disk_paths, results))
 
 
 def parse_meminfo(output: str) -> dict:

@@ -12,9 +12,18 @@ MQTT discovery:
 All three are independent toggles; enable any combination. At least one must
 be on.
 
-Entity names are prefixed with `Docker:` or `VM:` (e.g. `Docker: my-nginx`,
-`VM: ubuntu-vm`) so it's clear which is which when both are enabled on the
-same host.
+Entity names are prefixed with `Docker:`, `VM:`, or `Host:` (e.g.
+`Docker: my-nginx`, `VM: ubuntu-vm`, `Host: Disk Used (/)`) so it's clear
+which is which when more than one is enabled on the same host.
+
+### MQTT topics
+
+Everything is published under `ssh_manage_<host>`, where `<host>` is your
+configured `ssh.host` (e.g. `ssh_manage_192_168_1_101` or
+`ssh_manage_myserver_local`) — readable in an MQTT explorer, and distinct
+per remote host if you run the add-on against more than one. Underneath
+that: `.../docker/<container_id>/...`, `.../vm/<domain_name>/...`, and
+`.../host/<metric>`.
 
 ## Requirements on the remote host
 
@@ -66,7 +75,7 @@ You set these up yourself; the add-on never elevates privileges on its own:
 | `libvirt.enabled` | Discover/control libvirt VMs. Default `false`. |
 | `libvirt.connect_uri` | libvirt connection URI used on the remote host, default `qemu:///system` |
 | `monitoring.enabled` | Publish host disk/memory usage sensors. Default `false`. |
-| `monitoring.disk_path` | Path on the remote host whose filesystem usage is reported, default `/` |
+| `monitoring.disk_paths` | List of paths on the remote host whose filesystem usage is reported, default `["/"]` |
 | `ssh.host` / `ssh.port` / `ssh.username` | Remote connection details |
 | `ssh.key_mode` | `generate` or `paste` |
 | `ssh.private_key` | PEM private key text, only used when `key_mode: paste` |
@@ -78,16 +87,22 @@ You set these up yourself; the add-on never elevates privileges on its own:
 
 ### Host monitoring
 
-`monitoring.enabled` adds six sensors under a `Host:` prefix: Disk Used,
-Disk Free, and Disk Use (all for `monitoring.disk_path`), plus Memory Used,
-Memory Available, and Memory Use. Disk and memory sizes are published as
-plain numbers with `unit_of_measurement: GB` (decimal gigabytes, not GiB) so
-Home Assistant renders them as e.g. `42.7 GB` and keeps them graphable in
+`monitoring.enabled` adds three Memory sensors (Used, Available, Use%) plus
+three Disk sensors (Used, Free, Use%) *per path* in `monitoring.disk_paths`
+— so `disk_paths: ["/", "/mnt/data"]` gives you two full sets of disk
+sensors, named e.g. `Host: Disk Used (/)` and `Host: Disk Used (/mnt/data)`.
+Each path is queried independently (not `df /path1 /path2` in one call),
+since `df` de-duplicates rows for paths that share a filesystem — e.g. `/`
+and `/home` are often the same filesystem — which would otherwise make it
+ambiguous which output row belongs to which configured path.
+
+Disk and memory sizes are published as plain numbers with
+`unit_of_measurement: GB` (decimal gigabytes, not GiB) so Home Assistant
+renders them as e.g. `42.7 GB` and keeps them graphable in
 history/statistics — the state itself is never a pre-formatted string like
-`"42.7 GB"`, since that would break numeric graphing. The two "Use" sensors
-are percentages. No extra group membership is needed on the remote host:
-this reads `/proc/meminfo` and runs `df` on `monitoring.disk_path`, both of
-which are readable by any account.
+`"42.7 GB"`, since that would break numeric graphing. No extra group
+membership is needed on the remote host: this reads `/proc/meminfo` and
+runs `df` on each configured path, both readable by any account.
 
 Home Assistant's add-on options form always shows every field regardless of
 other selections — it can't hide `private_key` when `key_mode: generate`, or

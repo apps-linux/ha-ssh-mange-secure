@@ -9,14 +9,31 @@ def slugify(value: str) -> str:
 
 
 # key, display label, unit, icon
-HOST_SENSORS = (
-    ("disk_used", "Disk Used", "GB", "mdi:harddisk"),
-    ("disk_free", "Disk Free", "GB", "mdi:harddisk"),
-    ("disk_use_percent", "Disk Use", "%", "mdi:harddisk"),
+MEMORY_SENSORS = (
     ("memory_used", "Memory Used", "GB", "mdi:memory"),
     ("memory_free", "Memory Available", "GB", "mdi:memory"),
     ("memory_use_percent", "Memory Use", "%", "mdi:memory"),
 )
+
+# metric suffix, display label, unit, icon
+DISK_METRICS = (
+    ("used", "Disk Used", "GB", "mdi:harddisk"),
+    ("free", "Disk Free", "GB", "mdi:harddisk"),
+    ("use_percent", "Disk Use", "%", "mdi:harddisk"),
+)
+
+
+def slugify_path(path: str) -> str:
+    # slugify("/") collapses to nothing since every character is stripped;
+    # special-case the (very common) root path to a readable "root" instead
+    # of falling through to slugify's generic "unnamed".
+    if path.strip("/") == "":
+        return "root"
+    return slugify(path)
+
+
+def disk_metric_key(path: str, metric: str) -> str:
+    return f"disk_{metric}_{slugify_path(path)}"
 
 
 class MqttBridge:
@@ -27,26 +44,28 @@ class MqttBridge:
         username: str,
         password: str,
         discovery_prefix: str,
-        host_id: str,
+        ssh_host: str,
     ):
         self._host = host
         self._port = port
         self._username = username
         self._password = password
         self.discovery_prefix = discovery_prefix
-        self.host_id = host_id
+        self.host_slug = slugify(ssh_host)
+        self.topic_root = f"ssh_manage_{self.host_slug}"
+        self._display_host = ssh_host
         self.client: aiomqtt.Client | None = None
 
     def _resource_topic(self, kind: str, resource_id: str) -> str:
-        return f"ssh_docker_manager/{self.host_id}/{kind}/{resource_id}"
+        return f"{self.topic_root}/{kind}/{resource_id}"
 
     def _availability_topic(self) -> str:
-        return f"ssh_docker_manager/{self.host_id}/availability"
+        return f"{self.topic_root}/availability"
 
     def _device_payload(self) -> dict:
         return {
-            "identifiers": [f"ssh_docker_manager_{self.host_id}"],
-            "name": f"SSH host {self.host_id}",
+            "identifiers": [self.topic_root],
+            "name": f"SSH host {self._display_host}",
             "manufacturer": "ssh_docker_manager",
         }
 
@@ -65,7 +84,7 @@ class MqttBridge:
 
     async def publish_docker_discovery(self, container_id: str, name: str) -> None:
         base = self._resource_topic("docker", container_id)
-        unique_prefix = f"{self.host_id}_docker_{container_id[:12]}"
+        unique_prefix = f"{self.host_slug}_docker_{container_id[:12]}"
         display_name = f"Docker: {name}"
         availability_topic = self._availability_topic()
         device = self._device_payload()
@@ -118,7 +137,7 @@ class MqttBridge:
 
     async def publish_vm_discovery(self, domain_name: str) -> None:
         base = self._resource_topic("vm", domain_name)
-        unique_prefix = f"{self.host_id}_vm_{slugify(domain_name)}"
+        unique_prefix = f"{self.host_slug}_vm_{slugify(domain_name)}"
         display_name = f"VM: {domain_name}"
         availability_topic = self._availability_topic()
         device = self._device_payload()
@@ -154,33 +173,43 @@ class MqttBridge:
             retain=True,
         )
 
-    async def publish_host_discovery(self) -> None:
+    async def publish_host_discovery(self, disk_paths: list[str]) -> None:
         availability_topic = self._availability_topic()
         device = self._device_payload()
-        base = f"ssh_docker_manager/{self.host_id}/host"
+        base = f"{self.topic_root}/host"
 
-        for key, label, unit, icon in HOST_SENSORS:
-            unique_id = f"{self.host_id}_host_{key}"
-            config = {
-                "name": f"Host: {label}",
-                "unique_id": unique_id,
-                "state_topic": f"{base}/{key}",
-                "unit_of_measurement": unit,
-                "state_class": "measurement",
-                "icon": icon,
-                "availability_topic": availability_topic,
-                "device": device,
-            }
-            await self.client.publish(
-                f"{self.discovery_prefix}/sensor/{unique_id}/config",
-                json.dumps(config),
-                retain=True,
-            )
+        for key, label, unit, icon in MEMORY_SENSORS:
+            await self._publish_host_sensor_config(base, key, label, unit, icon)
+
+        for path in disk_paths:
+            for metric, label, unit, icon in DISK_METRICS:
+                key = disk_metric_key(path, metric)
+                await self._publish_host_sensor_config(
+                    base, key, f"{label} ({path})", unit, icon
+                )
+
+    async def _publish_host_sensor_config(
+        self, base: str, key: str, label: str, unit: str, icon: str
+    ) -> None:
+        unique_id = f"{self.host_slug}_host_{key}"
+        config = {
+            "name": f"Host: {label}",
+            "unique_id": unique_id,
+            "state_topic": f"{base}/{key}",
+            "unit_of_measurement": unit,
+            "state_class": "measurement",
+            "icon": icon,
+            "availability_topic": self._availability_topic(),
+            "device": self._device_payload(),
+        }
+        await self.client.publish(
+            f"{self.discovery_prefix}/sensor/{unique_id}/config",
+            json.dumps(config),
+            retain=True,
+        )
 
     async def publish_host_state(self, key: str, value) -> None:
-        await self.client.publish(
-            f"ssh_docker_manager/{self.host_id}/host/{key}", str(value), retain=True
-        )
+        await self.client.publish(f"{self.topic_root}/host/{key}", str(value), retain=True)
 
     async def publish_state(self, kind: str, resource_id: str, state: str) -> None:
         await self.client.publish(
@@ -193,5 +222,5 @@ class MqttBridge:
         )
 
     async def subscribe_commands(self) -> None:
-        # ssh_docker_manager/<host_id>/<kind>/<resource_id>/<action>
-        await self.client.subscribe(f"ssh_docker_manager/{self.host_id}/+/+/+")
+        # ssh_manage_<hostname>/<kind>/<resource_id>/<action>
+        await self.client.subscribe(f"{self.topic_root}/+/+/+")

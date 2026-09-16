@@ -1,5 +1,5 @@
 name: "SSH Linux Management"
-version: "0.5.0"
+version: "0.6.0"
 slug: "ssh_docker_manager"
 description: "Securely manage Docker containers and libvirt VMs on a remote Linux host over SSH, exposed to Home Assistant via MQTT."
 url: "https://github.com/apps-linux/ha-ssh-mange-secure"
@@ -20,7 +20,8 @@ options:
     connect_uri: "qemu:///system"
   monitoring:
     enabled: false
-    disk_path: "/"
+    disk_paths:
+      - "/"
   ssh:
     host: ""
     port: 22
@@ -44,7 +45,8 @@ schema:
     connect_uri: "str"
   monitoring:
     enabled: "bool"
-    disk_path: "str"
+    disk_paths:
+      - "str"
   ssh:
     host: "str"
     port: "port"

@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import logging
 import os
 import sys
@@ -14,16 +13,12 @@ import ssh_client
 from docker_client import DockerManager
 from host_monitor import HostMonitor, bytes_to_gb, percent
 from libvirt_client import LibvirtManager
-from mqtt_client import MqttBridge
+from mqtt_client import MqttBridge, disk_metric_key
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("ssh_docker_manager")
 
 RECONNECT_BACKOFF = [2, 5, 10, 30, 60]
-
-
-def host_id_for(host: str) -> str:
-    return hashlib.sha1(host.encode()).hexdigest()[:8]
 
 
 async def run_session(options: dict) -> None:
@@ -36,7 +31,7 @@ async def run_session(options: dict) -> None:
     libvirt_uri = libvirt_opts.get("connect_uri") or "qemu:///system"
     monitoring_opts = options.get("monitoring", {})
     monitoring_enabled = monitoring_opts.get("enabled", False)
-    disk_path = monitoring_opts.get("disk_path") or "/"
+    disk_paths = monitoring_opts.get("disk_paths") or ["/"]
     poll_interval = options.get("poll_interval", 30)
 
     if not docker_enabled and not libvirt_enabled and not monitoring_enabled:
@@ -55,14 +50,13 @@ async def run_session(options: dict) -> None:
         if pub:
             log.info("Add this public key to the remote account's authorized_keys:\n%s", pub)
 
-    host_id = host_id_for(ssh_opts["host"])
     mqtt = MqttBridge(
         mqtt_conf["host"],
         mqtt_conf["port"],
         mqtt_conf["username"],
         mqtt_conf["password"],
         options["mqtt"].get("discovery_prefix", "homeassistant"),
-        host_id,
+        ssh_opts["host"],
     )
     try:
         await mqtt.connect()
@@ -101,7 +95,7 @@ async def run_session(options: dict) -> None:
 
         host_monitor = None
         if monitoring_enabled:
-            host_monitor = HostMonitor(conn, disk_path)
+            host_monitor = HostMonitor(conn, disk_paths)
 
         await mqtt.publish_availability(True)
 
@@ -123,7 +117,7 @@ async def run_session(options: dict) -> None:
                 vm_state[name] = domain["state"]
 
         if host_monitor:
-            await mqtt.publish_host_discovery()
+            await mqtt.publish_host_discovery(disk_paths)
             await _publish_host_metrics(mqtt, host_monitor)
 
         await mqtt.subscribe_commands()
@@ -208,10 +202,15 @@ async def _publish_host_metrics(mqtt: MqttBridge, host_monitor: HostMonitor) -> 
         "memory_use_percent", percent(memory["used"], memory["total"])
     )
 
-    disk = await host_monitor.get_disk()
-    await mqtt.publish_host_state("disk_used", bytes_to_gb(disk["used"]))
-    await mqtt.publish_host_state("disk_free", bytes_to_gb(disk["available"]))
-    await mqtt.publish_host_state("disk_use_percent", percent(disk["used"], disk["total"]))
+    disks = await host_monitor.get_disks()
+    for path, disk in disks.items():
+        await mqtt.publish_host_state(disk_metric_key(path, "used"), bytes_to_gb(disk["used"]))
+        await mqtt.publish_host_state(
+            disk_metric_key(path, "free"), bytes_to_gb(disk["available"])
+        )
+        await mqtt.publish_host_state(
+            disk_metric_key(path, "use_percent"), percent(disk["used"], disk["total"])
+        )
 
 
 async def _poll_host(mqtt: MqttBridge, host_monitor: HostMonitor, poll_interval: int) -> None:
@@ -225,10 +224,10 @@ async def _handle_commands(
 ) -> None:
     async for message in mqtt.client.messages:
         parts = str(message.topic).split("/")
-        # ssh_docker_manager/<host_id>/<kind>/<resource_id>/<action>
-        if len(parts) != 5:
+        # ssh_manage_<hostname>/<kind>/<resource_id>/<action>
+        if len(parts) != 4:
             continue
-        _, _, kind, resource_id, action = parts
+        _, kind, resource_id, action = parts
         payload = message.payload.decode() if isinstance(message.payload, bytes) else message.payload
 
         try:
