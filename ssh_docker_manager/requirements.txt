@@ -1,3 +1,4 @@
 asyncssh>=2.14,<3
 aiodocker>=0.21,<1
 aiomqtt>=2.0,<3
+bcrypt>=4.0,<6
