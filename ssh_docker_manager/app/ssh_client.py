@@ -36,7 +36,7 @@ async def connect(
 
 
 async def _pin_host_key(conn: asyncssh.SSHClientConnection, host: str, port: int) -> None:
-    remote_key = conn.get_extra_info("server_host_key")
+    remote_key = conn.get_server_host_key()
     entry = f"[{host}]:{port} {remote_key.export_public_key().decode().strip()}\n"
     with open(KNOWN_HOSTS_PATH, "a") as f:
         f.write(entry)
