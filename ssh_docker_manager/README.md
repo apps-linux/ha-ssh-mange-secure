@@ -23,7 +23,19 @@ You set these up yourself; the add-on never elevates privileges on its own:
      private key text into `ssh.private_key`. The add-on's Configuration tab
      renders that as a single-line box in its basic form — switch to
      **Edit in YAML** (top-right of the tab) to paste the full multi-line
-     PEM text comfortably.
+     PEM text comfortably, and use a literal block scalar so YAML keeps the
+     line breaks intact:
+     ```yaml
+     ssh:
+       private_key: |
+         -----BEGIN OPENSSH PRIVATE KEY-----
+         ...
+         -----END OPENSSH PRIVATE KEY-----
+     ```
+     Without the `|`, a plain multi-line YAML value gets its line breaks
+     folded into spaces, which corrupts the key and fails with a
+     `Missing PEM footer` error. The add-on validates the key on startup and
+     will tell you this if it happens.
 
    There is no `upload` mode: Home Assistant's add-on configuration screen
    has no file-picker field type, so a real "choose file" upload isn't

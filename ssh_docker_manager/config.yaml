@@ -1,5 +1,5 @@
 name: "SSH Docker Manager"
-version: "0.3.1"
+version: "0.3.2"
 slug: "ssh_docker_manager"
 description: "Securely manage Docker containers on a remote Linux host over SSH, exposed to Home Assistant via MQTT."
 url: "https://github.com/apps-linux/ha-ssh-mange-secure"
