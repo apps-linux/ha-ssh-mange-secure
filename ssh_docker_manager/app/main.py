@@ -11,7 +11,7 @@ import config
 import key_manager
 import ssh_client
 from docker_client import DockerManager
-from host_monitor import HostMonitor, bytes_to_gb, percent
+from host_monitor import HostMonitor, bytes_to_gb, cpu_percent, percent
 from libvirt_client import LibvirtManager
 from mqtt_client import MqttBridge, disk_metric_key
 from util import parse_disk_paths, slugify
@@ -217,9 +217,22 @@ async def _publish_host_metrics(mqtt: MqttBridge, host_monitor: HostMonitor) -> 
 
 
 async def _poll_host(mqtt: MqttBridge, host_monitor: HostMonitor, poll_interval: int) -> None:
+    # CPU usage needs two /proc/stat samples to compute a delta (the same
+    # technique top/htop use), so the first sample is taken here and the
+    # first CPU reading is published after the first poll_interval tick,
+    # one cycle later than the disk/memory sensors that publish immediately
+    # at startup.
+    prev_cpu = await host_monitor.get_cpu_stat()
+
     while True:
         await asyncio.sleep(poll_interval)
         await _publish_host_metrics(mqtt, host_monitor)
+
+        curr_cpu = await host_monitor.get_cpu_stat()
+        usage = cpu_percent(prev_cpu, curr_cpu)
+        if usage is not None:
+            await mqtt.publish_host_state("cpu_use_percent", usage)
+        prev_cpu = curr_cpu
 
 
 async def _handle_commands(

@@ -8,7 +8,7 @@ discovery:
 - **libvirt VMs** (`libvirt_enabled`, off by default per server) — start,
   shut down, and reboot VMs managed by libvirt/QEMU.
 - **Host monitoring** (`monitoring_enabled`, off by default per server) —
-  disk and memory usage of the remote host itself, as sensors in GB/%.
+  CPU, disk, and memory usage of the remote host itself, as sensors in %/GB.
 
 All three are independent per-server toggles; enable any combination on each
 server. At least one must be on per server.
@@ -108,7 +108,7 @@ button.
 | `servers[].docker_enabled` | Discover/control Docker containers on this server. Default `true`. |
 | `servers[].libvirt_enabled` | Discover/control libvirt VMs on this server. Default `false`. |
 | `servers[].libvirt_connect_uri` | libvirt connection URI used on this server, default `qemu:///system` |
-| `servers[].monitoring_enabled` | Publish this server's disk/memory usage sensors. Default `false`. |
+| `servers[].monitoring_enabled` | Publish this server's CPU/disk/memory usage sensors. Default `false`. |
 | `servers[].monitoring_disk_paths` | Comma-separated paths on this server whose filesystem usage is reported, e.g. `/, /mnt/data`. Default `/`. A plain string, not a list — see note below. **Do not wrap the value in quote marks** — this is a plain text field, so typing `"/, /mnt/data"` makes the quote characters part of the literal string, producing invalid paths like `"/`. |
 | `servers[].poll_interval` | Seconds between this server's libvirt VM state polls and host monitoring updates (Docker uses the Docker event stream instead, no polling) |
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) — shared by all servers |
@@ -132,15 +132,22 @@ than silently producing broken paths like `"/`.
 
 ### Host monitoring
 
-`monitoring_enabled` adds three Memory sensors (Used, Available, Use%) plus
-three Disk sensors (Used, Free, Use%) *per path* in that server's
-`monitoring_disk_paths` — so entering `/, /mnt/data` (no quote marks) gives
-you two full sets of disk sensors, named e.g. `Host: Disk Used (/)` and
-`Host: Disk Used (/mnt/data)`. Each path is queried independently (not
-`df /path1 /path2` in one call), since `df` de-duplicates rows for paths
-that share a filesystem — e.g. `/` and `/home` are often the same
-filesystem — which would otherwise make it ambiguous which output row
-belongs to which configured path.
+`monitoring_enabled` adds one CPU sensor (Use%), three Memory sensors
+(Used, Available, Use%), and three Disk sensors (Used, Free, Use%) *per
+path* in that server's `monitoring_disk_paths` — so entering
+`/, /mnt/data` (no quote marks) gives you two full sets of disk sensors,
+named e.g. `Host: Disk Used (/)` and `Host: Disk Used (/mnt/data)`. Each
+path is queried independently (not `df /path1 /path2` in one call), since
+`df` de-duplicates rows for paths that share a filesystem — e.g. `/` and
+`/home` are often the same filesystem — which would otherwise make it
+ambiguous which output row belongs to which configured path.
+
+CPU usage is computed from two `/proc/stat` samples one `poll_interval`
+apart — the same delta technique `top`/`htop` use — rather than an
+instantaneous snapshot, since `/proc/stat` only exposes cumulative
+counters. That means `Host: CPU Use` has no value for the first
+`poll_interval` after the add-on starts (there's no prior sample to diff
+against yet); every other host sensor publishes immediately.
 
 Disk and memory sizes are published as plain numbers with
 `unit_of_measurement: GB` (decimal gigabytes, not GiB) so Home Assistant
@@ -199,12 +206,13 @@ before relying on it — if `virsh list --all` output looks different than
 expected (e.g. a very old or very new libvirt version changes the table
 format), the parser in `libvirt_client.py` is the place to look.
 
-Host monitoring: `/proc/meminfo` and `df -P -B1` parsing in
-`host_monitor.py` are covered by tests against realistic sample output
-(including the older-kernel fallback when `MemAvailable` isn't reported),
-and the GB/percent conversion and sensor publishing are covered against a
-fake monitor, but it hasn't been exercised against a real remote host over
-SSH yet.
+Host monitoring: disk and memory sensors are confirmed working against a
+real remote host in production use. CPU usage is new: the `/proc/stat`
+delta calculation (including the older-kernel fallback for a shorter field
+list, and the counters-went-backwards case, e.g. a reboot between polls,
+returning no value instead of a bogus one) and the full publish path are
+covered by tests against realistic sample output and fakes, but it hasn't
+been exercised against a real remote host over SSH yet.
 
 Multi-server support: confirmed working against a live Supervisor instance,
 including the `servers` list's **Add** button in the Configuration tab.

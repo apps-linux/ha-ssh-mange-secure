@@ -4,6 +4,14 @@ All notable changes to the SSH Linux Management add-on are documented here.
 This file itself is picked up and shown in the **Changelog** tab of the
 add-on's page in Home Assistant.
 
+## 0.8.0
+
+### Added
+- CPU usage sensor (`Host: CPU Use`, %) for `monitoring_enabled`. Computed
+  from two `/proc/stat` samples one `poll_interval` apart (the same delta
+  technique `top`/`htop` use), so it has no value until the second poll
+  after startup - every other host sensor publishes immediately.
+
 ## 0.7.5
 
 ### Fixed

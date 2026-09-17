@@ -11,6 +11,8 @@ MEMORY_SENSORS = (
     ("memory_use_percent", "Memory Use", "%", "mdi:memory"),
 )
 
+CPU_SENSORS = (("cpu_use_percent", "CPU Use", "%", "mdi:cpu-64-bit"),)
+
 # metric suffix, display label, unit, icon
 DISK_METRICS = (
     ("used", "Disk Used", "GB", "mdi:harddisk"),
@@ -165,7 +167,7 @@ class MqttBridge:
         device = self._device_payload()
         base = f"{self.topic_root}/host"
 
-        for key, label, unit, icon in MEMORY_SENSORS:
+        for key, label, unit, icon in MEMORY_SENSORS + CPU_SENSORS:
             await self._publish_host_sensor_config(base, key, label, unit, icon)
 
         for path in disk_paths:

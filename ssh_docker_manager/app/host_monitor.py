@@ -3,6 +3,8 @@ import re
 import shlex
 
 MEMINFO_LINE = re.compile(r"^(\w+):\s+(\d+)\s*kB")
+CPU_LINE = re.compile(r"^cpu\s+(.*)")
+CPU_FIELDS = ("user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal")
 
 
 class HostMonitor:
@@ -38,6 +40,10 @@ class HostMonitor:
         results = await asyncio.gather(*(self.get_disk(path) for path in self._disk_paths))
         return dict(zip(self._disk_paths, results))
 
+    async def get_cpu_stat(self) -> dict:
+        output = await self._run("cat /proc/stat")
+        return parse_cpu_stat(output)
+
 
 def parse_meminfo(output: str) -> dict:
     values = {}
@@ -71,6 +77,42 @@ def parse_df(output: str, path: str) -> dict:
 
     total, used, available = int(fields[1]), int(fields[2]), int(fields[3])
     return {"total": total, "used": used, "available": available}
+
+
+def parse_cpu_stat(output: str) -> dict:
+    """Parses the aggregate "cpu " line of /proc/stat, e.g.:
+
+        cpu  74608 2520 24433 1160535 8434 0 1284 0 0 0
+
+    into named jiffy counters. Per-core "cpu0", "cpu1", ... lines are
+    ignored - only the aggregate matters for a single overall usage figure.
+    """
+    for line in output.splitlines():
+        match = CPU_LINE.match(line)
+        if match:
+            values = [int(p) for p in match.group(1).split()]
+            # iowait/irq/softirq/steal were added to /proc/stat in later
+            # kernels than user/nice/system/idle - pad with 0 if missing.
+            values += [0] * (len(CPU_FIELDS) - len(values))
+            return dict(zip(CPU_FIELDS, values[: len(CPU_FIELDS)]))
+    raise RuntimeError(f"No 'cpu ' line found in /proc/stat output: {output!r}")
+
+
+def cpu_percent(prev: dict, curr: dict) -> float | None:
+    """CPU utilization (%) between two /proc/stat samples, the same delta
+    technique `top`/`htop` use. Returns None if the samples don't support a
+    valid delta (e.g. a reboot reset the counters between polls) rather than
+    publishing a nonsensical value."""
+    prev_idle = prev["idle"] + prev["iowait"]
+    curr_idle = curr["idle"] + curr["iowait"]
+    total_delta = sum(curr.values()) - sum(prev.values())
+    idle_delta = curr_idle - prev_idle
+
+    if total_delta <= 0:
+        return None
+
+    usage = 100 * (total_delta - idle_delta) / total_delta
+    return round(max(0.0, min(100.0, usage)), 1)
 
 
 def bytes_to_gb(value: int) -> float:
