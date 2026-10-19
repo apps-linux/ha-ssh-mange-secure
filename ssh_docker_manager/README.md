@@ -9,6 +9,9 @@ discovery:
   shut down, and reboot VMs managed by libvirt/QEMU.
 - **Host monitoring** (`monitoring_enabled`, off by default per server) —
   CPU, disk, and memory usage of the remote host itself, as sensors in %/GB.
+- **Backup status** (`backup_status_path`, empty/off by default per server) —
+  per-job status of the backup jobs on the remote host, read from a JSON
+  status file there (see *Backup status* below).
 
 All three are independent per-server toggles; enable any combination on each
 server. At least one must be on per server.
@@ -110,6 +113,8 @@ button.
 | `servers[].libvirt_connect_uri` | libvirt connection URI used on this server, default `qemu:///system` |
 | `servers[].monitoring_enabled` | Publish this server's CPU/disk/memory usage sensors. Default `false`. |
 | `servers[].monitoring_disk_paths` | Comma-separated paths on this server whose filesystem usage is reported, e.g. `/, /mnt/data`. Default `/`. A plain string, not a list — see note below. **Do not wrap the value in quote marks** — this is a plain text field, so typing `"/, /mnt/data"` makes the quote characters part of the literal string, producing invalid paths like `"/`. |
+| `servers[].backup_status_path` | Path of a backup status JSON file on this server, e.g. `/var/lib/portal-backup/status.json`. Empty (default) turns backup status off. See *Backup status*. |
+| `servers[].backup_max_age_hours` | A job whose newest snapshot is older than this many hours shows as `stale`. Default `26` (a daily job plus slack). |
 | `servers[].poll_interval` | Seconds between this server's libvirt VM state polls and host monitoring updates (Docker uses the Docker event stream instead, no polling) |
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) — shared by all servers |
 | `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Required in `broker_mode: external`; optional overrides in `broker_mode: homeassistant` (see below) — shared by all servers |
@@ -173,6 +178,54 @@ install with the Mosquitto add-on installed can reach — using
 default config only allows anonymous connections from Home Assistant's core
 supervisor network, so you may need to add a login for this add-on's account
 in the Mosquitto add-on's configuration).
+
+### Backup status
+
+With `backup_status_path` set, the add-on reads that file with a plain
+`cat` over the same SSH connection every `poll_interval` - it never runs
+the backups, reads backup contents, or needs extra rights: the file only
+has to be readable by the SSH account. Something on the host keeps the file
+current (e.g. a systemd timer running a small exporter every few minutes).
+Expected format:
+
+```json
+{
+  "generated": "2026-10-19T18:00:00+02:00",
+  "backup_disk_mounted": true,
+  "jobs": [
+    {"name": "nextcloud", "running": false, "result": "success", "exit_status": 0,
+     "timer_enabled": true, "schedule": "03:00", "next_run": "...",
+     "last_start": "...", "last_end": "...",
+     "latest_snapshot": "2026-10-19_0300", "latest_snapshot_time": "2026-10-19T03:00:00+02:00",
+     "snapshot_count": 14}
+  ],
+  "coverage": {"uncovered": [{"name": "some-compose-project"}]}
+}
+```
+
+Only `jobs[].name` is required; every other field is optional. Timestamps
+are ISO 8601, ideally with a UTC offset.
+
+Entities per job (new jobs in the file are picked up automatically):
+
+| Entity | Meaning |
+|---|---|
+| `Backup: <job>` | `ok`, `running`, `failed` (result not `success` or non-zero exit status), `timer_disabled`, `no_snapshot`, `stale` (newest snapshot older than `backup_max_age_hours`), or `error` (the job has an `error` field). All job fields are attributes. |
+| `Backup: <job> Last Snapshot` | Timestamp of the newest snapshot |
+| `Backup: <job> Problem` | Problem binary sensor: on for anything but `ok`/`running` |
+
+And once per server:
+
+| Entity | Meaning |
+|---|---|
+| `Backup: Overall` | `ok`, `problem`, or `error` (file missing/unreadable/not valid JSON). Attribute `problems` lists the reasons. |
+| `Backup: Problem` | On whenever `Backup: Overall` is not `ok` - the one entity to alert on |
+| `Backup: Status Updated` | The file's `generated` time |
+
+`Backup: Overall` is also `problem` when the file's `generated` time is older
+than 30 minutes (the exporter stopped), `backup_disk_mounted` is `false`, or
+`coverage.uncovered` lists anything. A missing or broken file never drops the
+server's SSH session - Docker, VMs and host monitoring keep working.
 
 ## Security notes
 

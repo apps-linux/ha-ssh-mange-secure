@@ -197,6 +197,94 @@ class MqttBridge:
             retain=True,
         )
 
+    async def _publish_discovery(self, component: str, unique_id: str, config: dict) -> None:
+        config = {
+            "unique_id": unique_id,
+            "availability_topic": self._availability_topic(),
+            "device": self._device_payload(),
+            **config,
+        }
+        await self.client.publish(
+            f"{self.discovery_prefix}/{component}/{unique_id}/config",
+            json.dumps(config),
+            retain=True,
+        )
+
+    def _backup_job_topic(self, job_name: str) -> str:
+        return f"{self.topic_root}/backup/{slugify(job_name)}"
+
+    def _backup_summary_topic(self) -> str:
+        return f"{self.topic_root}/backup_summary"
+
+    async def publish_backup_job_discovery(self, job_name: str) -> None:
+        base = self._backup_job_topic(job_name)
+        unique_prefix = f"{self.host_slug}_backup_{slugify(job_name)}"
+        display_name = f"Backup: {job_name}"
+
+        await self._publish_discovery("sensor", unique_prefix, {
+            "name": display_name,
+            "state_topic": f"{base}/state",
+            "json_attributes_topic": f"{base}/attributes",
+            "icon": "mdi:backup-restore",
+        })
+        await self._publish_discovery("sensor", f"{unique_prefix}_last_snapshot", {
+            "name": f"{display_name} Last Snapshot",
+            "state_topic": f"{base}/last_snapshot",
+            "device_class": "timestamp",
+        })
+        await self._publish_discovery("binary_sensor", f"{unique_prefix}_problem", {
+            "name": f"{display_name} Problem",
+            "state_topic": f"{base}/problem",
+            "device_class": "problem",
+        })
+
+    async def publish_backup_summary_discovery(self) -> None:
+        base = self._backup_summary_topic()
+        unique_prefix = f"{self.host_slug}_backup_summary"
+
+        await self._publish_discovery("sensor", unique_prefix, {
+            "name": "Backup: Overall",
+            "state_topic": f"{base}/state",
+            "json_attributes_topic": f"{base}/attributes",
+            "icon": "mdi:backup-restore",
+        })
+        await self._publish_discovery("binary_sensor", f"{unique_prefix}_problem", {
+            "name": "Backup: Problem",
+            "state_topic": f"{base}/problem",
+            "device_class": "problem",
+        })
+        await self._publish_discovery("sensor", f"{unique_prefix}_status_updated", {
+            "name": "Backup: Status Updated",
+            "state_topic": f"{base}/status_updated",
+            "device_class": "timestamp",
+        })
+
+    async def publish_backup_job_state(
+        self, job_name: str, state: str, problem: bool, last_snapshot: str | None, attributes: dict
+    ) -> None:
+        await self._publish_backup_states(
+            self._backup_job_topic(job_name), state, problem, attributes,
+            last_snapshot=last_snapshot,
+        )
+
+    async def publish_backup_summary_state(
+        self, state: str, problem: bool, status_updated: str | None, attributes: dict
+    ) -> None:
+        await self._publish_backup_states(
+            self._backup_summary_topic(), state, problem, attributes,
+            status_updated=status_updated,
+        )
+
+    async def _publish_backup_states(
+        self, base: str, state: str, problem: bool, attributes: dict, **timestamps
+    ) -> None:
+        await self.client.publish(f"{base}/state", state, retain=True)
+        await self.client.publish(f"{base}/problem", "ON" if problem else "OFF", retain=True)
+        await self.client.publish(f"{base}/attributes", json.dumps(attributes), retain=True)
+        for key, value in timestamps.items():
+            # "None" is what HA's MQTT sensor reads as "unknown".
+            await self.client.publish(f"{base}/{key}", value or "None", retain=True)
+
     async def publish_host_state(self, key: str, value) -> None:
         await self.client.publish(f"{self.topic_root}/host/{key}", str(value), retain=True)
 

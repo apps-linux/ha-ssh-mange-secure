@@ -4,6 +4,18 @@ All notable changes to the SSH Linux Management add-on are documented here.
 This file itself is picked up and shown in the **Changelog** tab of the
 add-on's page in Home Assistant.
 
+## 0.9.0
+
+### Added
+- Backup status (`backup_status_path`, off by default): reads a backup
+  status JSON file on the remote host over SSH every `poll_interval` and
+  publishes per job a status sensor (`ok`/`running`/`failed`/`stale`/...,
+  with all job details as attributes), a last-snapshot timestamp sensor and
+  a problem binary sensor, plus `Backup: Overall`, `Backup: Problem` and
+  `Backup: Status Updated` per server. `backup_max_age_hours` (default 26)
+  sets when a job counts as stale. A missing or broken status file shows as
+  `error` in HA and never drops the server's session.
+
 ## 0.8.0
 
 ### Added

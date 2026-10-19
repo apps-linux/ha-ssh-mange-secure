@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 import aiomqtt
 
@@ -10,6 +11,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import config
 import key_manager
 import ssh_client
+from backup_status import BackupStatusReader, HEALTHY_JOB_STATES, job_attributes, job_state, summarize
 from docker_client import DockerManager
 from host_monitor import HostMonitor, bytes_to_gb, cpu_percent, percent
 from libvirt_client import LibvirtManager
@@ -32,11 +34,18 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
     monitoring_enabled = server.get("monitoring_enabled", False)
     disk_paths = parse_disk_paths(server.get("monitoring_disk_paths"))
     poll_interval = server.get("poll_interval", 30)
+    backup_status_path = (server.get("backup_status_path") or "").strip()
+    backup_max_age = timedelta(hours=server.get("backup_max_age_hours") or 26)
 
-    if not docker_enabled and not libvirt_enabled and not monitoring_enabled:
+    if (
+        not docker_enabled
+        and not libvirt_enabled
+        and not monitoring_enabled
+        and not backup_status_path
+    ):
         raise RuntimeError(
             f"Server '{host}': docker_enabled, libvirt_enabled and monitoring_enabled "
-            "are all false - enable at least one."
+            "are all false and backup_status_path is empty - enable at least one."
         )
 
     key_mode = server.get("key_mode", "generate")
@@ -100,6 +109,10 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
         if monitoring_enabled:
             host_monitor = HostMonitor(conn, disk_paths)
 
+        backup_reader = None
+        if backup_status_path:
+            backup_reader = BackupStatusReader(conn, backup_status_path)
+
         await mqtt.publish_availability(True)
 
         if docker_mgr:
@@ -123,6 +136,13 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
             await mqtt.publish_host_discovery(disk_paths)
             await _publish_host_metrics(mqtt, host_monitor)
 
+        known_backup_jobs: set[str] = set()
+        if backup_reader:
+            await mqtt.publish_backup_summary_discovery()
+            await _publish_backup_status(
+                mqtt, backup_reader, backup_max_age, known_backup_jobs, host
+            )
+
         await mqtt.subscribe_commands()
 
         tasks = [
@@ -139,6 +159,14 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
             )
         if host_monitor:
             tasks.append(asyncio.create_task(_poll_host(mqtt, host_monitor, poll_interval)))
+        if backup_reader:
+            tasks.append(
+                asyncio.create_task(
+                    _poll_backups(
+                        mqtt, backup_reader, poll_interval, backup_max_age, known_backup_jobs, host
+                    )
+                )
+            )
 
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
@@ -233,6 +261,61 @@ async def _poll_host(mqtt: MqttBridge, host_monitor: HostMonitor, poll_interval:
         if usage is not None:
             await mqtt.publish_host_state("cpu_use_percent", usage)
         prev_cpu = curr_cpu
+
+
+async def _publish_backup_status(
+    mqtt: MqttBridge,
+    reader: BackupStatusReader,
+    max_age: timedelta,
+    known_jobs: set[str],
+    host: str,
+) -> None:
+    now = datetime.now(timezone.utc)
+    try:
+        status = await reader.read()
+    except Exception as exc:
+        # A missing or broken status file is a backup problem to show in HA,
+        # not a reason to tear down this server's SSH session.
+        log.warning("[%s] Backup status unavailable: %s", host, exc)
+        await mqtt.publish_backup_summary_state(
+            "error", True, None, {"problems": [str(exc)]}
+        )
+        return
+
+    for job in status["jobs"]:
+        name = job["name"]
+        if name not in known_jobs:
+            await mqtt.publish_backup_job_discovery(name)
+            known_jobs.add(name)
+        state = job_state(job, now, max_age)
+        await mqtt.publish_backup_job_state(
+            name,
+            state,
+            state not in HEALTHY_JOB_STATES,
+            job.get("latest_snapshot_time"),
+            job_attributes(job),
+        )
+
+    summary = summarize(status, now, max_age)
+    await mqtt.publish_backup_summary_state(
+        summary["state"],
+        summary["state"] != "ok",
+        status.get("generated"),
+        summary["attributes"],
+    )
+
+
+async def _poll_backups(
+    mqtt: MqttBridge,
+    reader: BackupStatusReader,
+    poll_interval: int,
+    max_age: timedelta,
+    known_jobs: set[str],
+    host: str,
+) -> None:
+    while True:
+        await asyncio.sleep(poll_interval)
+        await _publish_backup_status(mqtt, reader, max_age, known_jobs, host)
 
 
 async def _handle_commands(
