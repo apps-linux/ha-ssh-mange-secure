@@ -285,6 +285,25 @@ class MqttBridge:
             # "None" is what HA's MQTT sensor reads as "unknown".
             await self.client.publish(f"{base}/{key}", value or "None", retain=True)
 
+    def _paperless_topic(self) -> str:
+        return f"{self.topic_root}/paperless"
+
+    async def publish_paperless_discovery(self) -> None:
+        base = self._paperless_topic()
+        await self._publish_discovery("sensor", f"{self.host_slug}_paperless_last_upload", {
+            "name": "Paperless: Last Upload",
+            "state_topic": f"{base}/last_upload",
+            "json_attributes_topic": f"{base}/attributes",
+            "device_class": "timestamp",
+            "icon": "mdi:file-document-arrow-right",
+        })
+
+    async def publish_paperless_state(self, last_upload: str | None, attributes: dict) -> None:
+        base = self._paperless_topic()
+        # "None" is what HA's MQTT sensor reads as "unknown".
+        await self.client.publish(f"{base}/last_upload", last_upload or "None", retain=True)
+        await self.client.publish(f"{base}/attributes", json.dumps(attributes), retain=True)
+
     async def publish_host_state(self, key: str, value) -> None:
         await self.client.publish(f"{self.topic_root}/host/{key}", str(value), retain=True)
 

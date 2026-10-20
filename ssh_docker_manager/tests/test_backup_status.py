@@ -7,7 +7,7 @@ APP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app")
 sys.path.insert(0, APP)
 # stub aiomqtt (not installed locally)
 sys.modules["aiomqtt"] = types.SimpleNamespace(Client=object, MqttError=Exception)
-for _m in ("asyncssh", "aiodocker"): sys.modules[_m] = types.SimpleNamespace()
+for _m in ("asyncssh", "aiodocker"): sys.modules[_m] = types.SimpleNamespace(SSHClientConnection=object)
 import backup_status as bs
 import mqtt_client, main
 

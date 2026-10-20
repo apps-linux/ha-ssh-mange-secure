@@ -15,6 +15,7 @@ from backup_status import BackupStatusReader, HEALTHY_JOB_STATES, job_attributes
 from docker_client import DockerManager
 from host_monitor import HostMonitor, bytes_to_gb, cpu_percent, percent
 from libvirt_client import LibvirtManager
+from paperless_status import PaperlessStatusReader, uploads_state
 from mqtt_client import MqttBridge, disk_metric_key
 from util import parse_disk_paths, slugify
 
@@ -36,16 +37,19 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
     poll_interval = server.get("poll_interval", 30)
     backup_status_path = (server.get("backup_status_path") or "").strip()
     backup_max_age = timedelta(hours=server.get("backup_max_age_hours") or 26)
+    paperless_status_path = (server.get("paperless_status_path") or "").strip()
 
     if (
         not docker_enabled
         and not libvirt_enabled
         and not monitoring_enabled
         and not backup_status_path
+        and not paperless_status_path
     ):
         raise RuntimeError(
             f"Server '{host}': docker_enabled, libvirt_enabled and monitoring_enabled "
-            "are all false and backup_status_path is empty - enable at least one."
+            "are all false and backup_status_path and paperless_status_path are empty - "
+            "enable at least one."
         )
 
     key_mode = server.get("key_mode", "generate")
@@ -113,6 +117,10 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
         if backup_status_path:
             backup_reader = BackupStatusReader(conn, backup_status_path)
 
+        paperless_reader = None
+        if paperless_status_path:
+            paperless_reader = PaperlessStatusReader(conn, paperless_status_path)
+
         await mqtt.publish_availability(True)
 
         if docker_mgr:
@@ -143,6 +151,10 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
                 mqtt, backup_reader, backup_max_age, known_backup_jobs, host
             )
 
+        if paperless_reader:
+            await mqtt.publish_paperless_discovery()
+            await _publish_paperless_status(mqtt, paperless_reader, host)
+
         await mqtt.subscribe_commands()
 
         tasks = [
@@ -166,6 +178,10 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
                         mqtt, backup_reader, poll_interval, backup_max_age, known_backup_jobs, host
                     )
                 )
+            )
+        if paperless_reader:
+            tasks.append(
+                asyncio.create_task(_poll_paperless(mqtt, paperless_reader, poll_interval, host))
             )
 
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -316,6 +332,28 @@ async def _poll_backups(
     while True:
         await asyncio.sleep(poll_interval)
         await _publish_backup_status(mqtt, reader, max_age, known_jobs, host)
+
+
+async def _publish_paperless_status(
+    mqtt: MqttBridge, reader: PaperlessStatusReader, host: str
+) -> None:
+    try:
+        data = await reader.read()
+    except Exception as exc:
+        # Like backups: a missing/broken file shows in HA, the session stays up.
+        log.warning("[%s] Paperless status unavailable: %s", host, exc)
+        await mqtt.publish_paperless_state(None, {"error": str(exc), "documents": []})
+        return
+    last_upload, attributes = uploads_state(data)
+    await mqtt.publish_paperless_state(last_upload, attributes)
+
+
+async def _poll_paperless(
+    mqtt: MqttBridge, reader: PaperlessStatusReader, poll_interval: int, host: str
+) -> None:
+    while True:
+        await asyncio.sleep(poll_interval)
+        await _publish_paperless_status(mqtt, reader, host)
 
 
 async def _handle_commands(

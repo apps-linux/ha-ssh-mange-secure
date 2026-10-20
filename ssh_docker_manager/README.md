@@ -12,6 +12,9 @@ discovery:
 - **Backup status** (`backup_status_path`, empty/off by default per server) —
   per-job status of the backup jobs on the remote host, read from a JSON
   status file there (see *Backup status* below).
+- **Paperless recent uploads** (`paperless_status_path`, empty/off by default
+  per server) — the last documents added to Paperless-ngx with their target
+  folder, read from a JSON file there (see *Paperless recent uploads* below).
 
 All three are independent per-server toggles; enable any combination on each
 server. At least one must be on per server.
@@ -115,6 +118,7 @@ button.
 | `servers[].monitoring_disk_paths` | Comma-separated paths on this server whose filesystem usage is reported, e.g. `/, /mnt/data`. Default `/`. A plain string, not a list — see note below. **Do not wrap the value in quote marks** — this is a plain text field, so typing `"/, /mnt/data"` makes the quote characters part of the literal string, producing invalid paths like `"/`. |
 | `servers[].backup_status_path` | Path of a backup status JSON file on this server, e.g. `/var/lib/portal-backup/status.json`. Empty (default) turns backup status off. See *Backup status*. |
 | `servers[].backup_max_age_hours` | A job whose newest snapshot is older than this many hours shows as `stale`. Default `26` (a daily job plus slack). |
+| `servers[].paperless_status_path` | Path of a Paperless recent-uploads JSON file on this server, e.g. `/var/lib/portal-paperless/recent.json`. Empty (default) turns it off. See *Paperless recent uploads*. |
 | `servers[].poll_interval` | Seconds between this server's libvirt VM state polls and host monitoring updates (Docker uses the Docker event stream instead, no polling) |
 | `mqtt.broker_mode` | `homeassistant` (default, uses the Mosquitto add-on) or `external` (a separate broker) — shared by all servers |
 | `mqtt.host` / `mqtt.port` / `mqtt.username` / `mqtt.password` | Required in `broker_mode: external`; optional overrides in `broker_mode: homeassistant` (see below) — shared by all servers |
@@ -226,6 +230,31 @@ And once per server:
 than 30 minutes (the exporter stopped), `backup_disk_mounted` is `false`, or
 `coverage.uncovered` lists anything. A missing or broken file never drops the
 server's SSH session - Docker, VMs and host monitoring keep working.
+
+### Paperless recent uploads
+
+With `paperless_status_path` set, the add-on reads that file the same way as
+the backup status file (plain `cat` over SSH, every `poll_interval`). It never
+talks to Paperless itself and needs no Paperless token: something on the host
+writes the file, e.g. a systemd timer running a read-only database query.
+Expected format, newest document first:
+
+```json
+{
+  "generated": "2026-10-20T15:00:00+02:00",
+  "documents": [
+    {"id": 519, "title": "...", "added": "2026-10-15T21:42:28+02:00",
+     "owner": "...", "correspondent": "...", "folder": "04 Versicherungen/Rechtsschutz/...",
+     "status": "uploaded", "business": false}
+  ]
+}
+```
+
+It publishes one sensor, `Paperless: Last Upload` (timestamp of the newest
+document). Its attributes hold `documents` (the list above, only the fields
+shown), `count`, `last_title` and `generated` - enough for a Markdown card
+table in Home Assistant. A missing or broken file sets the sensor to unknown
+with an `error` attribute; the server's session keeps running.
 
 ## Security notes
 

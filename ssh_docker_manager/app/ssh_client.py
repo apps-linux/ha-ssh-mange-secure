@@ -1,5 +1,6 @@
 import logging
 import os
+import shlex
 
 import asyncssh
 
@@ -98,3 +99,12 @@ async def forward_docker_socket(conn: asyncssh.SSHClientConnection):
 
     listener = await conn.forward_local_path(LOCAL_DOCKER_SOCK, REMOTE_DOCKER_SOCK)
     return listener, LOCAL_DOCKER_SOCK
+
+
+async def read_remote_file(conn: asyncssh.SSHClientConnection, path: str) -> str:
+    """Reads a (small) text file on the remote host with a plain `cat` over the
+    existing connection - no extra rights beyond read access to that file."""
+    result = await conn.run(f"cat -- {shlex.quote(path)}", check=False)
+    if result.exit_status != 0:
+        raise RuntimeError(f"cannot read {path}: {result.stderr.strip()}")
+    return result.stdout

@@ -1,6 +1,7 @@
 import json
-import shlex
 from datetime import datetime, timedelta, timezone
+
+from ssh_client import read_remote_file
 
 # A status file whose "generated" time is older than this means the exporter
 # on the remote host stopped running - every job value in it is then stale.
@@ -51,10 +52,7 @@ class BackupStatusReader:
         self._path = path
 
     async def read(self) -> dict:
-        result = await self._conn.run(f"cat -- {shlex.quote(self._path)}", check=False)
-        if result.exit_status != 0:
-            raise RuntimeError(f"cannot read {self._path}: {result.stderr.strip()}")
-        return parse_status(result.stdout)
+        return parse_status(await read_remote_file(self._conn, self._path))
 
 
 def parse_status(text: str) -> dict:

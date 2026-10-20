@@ -4,6 +4,17 @@ All notable changes to the SSH Linux Management add-on are documented here.
 This file itself is picked up and shown in the **Changelog** tab of the
 add-on's page in Home Assistant.
 
+## 0.10.0
+
+### Added
+- Paperless recent uploads (`paperless_status_path`, off by default): reads a
+  JSON file with the last documents added to Paperless-ngx (title, time,
+  owner, target folder, status) over SSH and publishes the sensor
+  `Paperless: Last Upload` with the documents as attributes.
+
+### Changed
+- Backup status and Paperless status share one remote-file reader.
+
 ## 0.9.0
 
 ### Added
