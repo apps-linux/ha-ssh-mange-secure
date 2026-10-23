@@ -39,7 +39,7 @@ Each server publishes under `ssh_manage_<host>`, where `<host>` is that
 server's configured `host` field (e.g. `ssh_manage_192_168_1_101` or
 `ssh_manage_myserver_local`) — readable in an MQTT explorer, and guaranteed
 distinct from your other configured servers as long as their `host` values
-are distinct. Underneath that: `.../docker/<container_id>/...`,
+are distinct. Underneath that: `.../docker/<container_name>/...`,
 `.../vm/<domain_name>/...`, and `.../host/<metric>`.
 
 ## Requirements on the remote host
