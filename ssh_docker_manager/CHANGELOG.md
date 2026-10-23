@@ -4,6 +4,19 @@ All notable changes to the SSH Linux Management add-on are documented here.
 This file itself is picked up and shown in the **Changelog** tab of the
 add-on's page in Home Assistant.
 
+## 0.11.0
+
+### Fixed
+- Docker entities are now keyed on the container name instead of its ID.
+  A container recreated by `docker compose up` or an image update keeps its
+  entity; before, every recreate left a stale duplicate (`_2`, `_3`, ...).
+- On startup the add-on clears retained Docker discovery configs of the host
+  that don't belong to a current container (removed containers and configs
+  from the old ID-based scheme), so HA removes those entities for good.
+- Container state after Docker events is the real state (`running`,
+  `exited`, ...) instead of the event name, and containers created after
+  startup are discovered.
+
 ## 0.10.0
 
 ### Added

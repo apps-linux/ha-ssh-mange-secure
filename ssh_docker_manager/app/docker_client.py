@@ -8,6 +8,16 @@ class DockerManager:
     async def list_containers(self):
         return await self.docker.containers.list(all=True)
 
+    async def status(self, name: str) -> str | None:
+        """State.Status of the container, or None if it no longer exists."""
+        try:
+            info = await self.docker.containers.container(name).show()
+        except aiodocker.exceptions.DockerError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return info["State"]["Status"]
+
     async def start(self, container_id: str) -> None:
         await self.docker.containers.container(container_id).start()
 

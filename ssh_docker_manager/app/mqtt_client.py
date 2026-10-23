@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import aiomqtt
@@ -23,6 +24,17 @@ DISK_METRICS = (
 
 def disk_metric_key(path: str, metric: str) -> str:
     return f"disk_{metric}_{slugify_path(path)}"
+
+
+def stale_docker_topics(retained: set[str], keep: set[str], object_prefix: str) -> list[str]:
+    """Retained discovery topics <prefix>/<component>/<object_id>/config whose
+    object_id belongs to this host's Docker entities but isn't in `keep`."""
+    return sorted(
+        t for t in retained
+        if t not in keep
+        and t.endswith("/config")
+        and t.split("/")[-2].startswith(object_prefix)
+    )
 
 
 class MqttBridge:
@@ -71,9 +83,59 @@ class MqttBridge:
         if self.client:
             await self.client.__aexit__(None, None, None)
 
-    async def publish_docker_discovery(self, container_id: str, name: str) -> None:
-        base = self._resource_topic("docker", container_id)
-        unique_prefix = f"{self.host_slug}_docker_{container_id[:12]}"
+    def _docker_unique_prefix(self, name: str) -> str:
+        # Keyed on the container name, not its ID: compose/update recreates a
+        # container with a new ID but the same name, and an ID-based unique_id
+        # left a stale duplicate entity (_2, _3, ...) in HA after every recreate.
+        return f"{self.host_slug}_docker_{slugify(name)}"
+
+    def docker_discovery_topics(self, name: str) -> list[str]:
+        prefix = self._docker_unique_prefix(name)
+        return [
+            f"{self.discovery_prefix}/switch/{prefix}/config",
+            f"{self.discovery_prefix}/button/{prefix}_restart/config",
+            f"{self.discovery_prefix}/update/{prefix}_update/config",
+        ]
+
+    async def prune_docker_discovery(self, keep_names: list[str]) -> list[str]:
+        """Clears retained Docker discovery configs of this host that don't
+        belong to a current container (removed containers, and configs from
+        the old ID-based scheme), so HA removes those entities for good."""
+        topics = [
+            f"{self.discovery_prefix}/{component}/+/config"
+            for component in ("switch", "button", "update")
+        ]
+        for topic in topics:
+            await self.client.subscribe(topic)
+        retained = await self._collect_retained()
+        for topic in topics:
+            await self.client.unsubscribe(topic)
+
+        keep = {t for name in keep_names for t in self.docker_discovery_topics(name)}
+        stale = stale_docker_topics(retained, keep, f"{self.host_slug}_docker_")
+        for topic in stale:
+            await self.client.publish(topic, b"", retain=True)
+        return stale
+
+    async def _collect_retained(self, quiet: float = 1.0, limit: float = 10.0) -> set[str]:
+        # Retained messages arrive right after subscribing; stop once the
+        # broker has been quiet for `quiet` seconds.
+        topics: set[str] = set()
+        messages = aiter(self.client.messages)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + limit
+        while loop.time() < deadline:
+            try:
+                message = await asyncio.wait_for(anext(messages), quiet)
+            except asyncio.TimeoutError:
+                break
+            if message.retain and message.payload:
+                topics.add(str(message.topic))
+        return topics
+
+    async def publish_docker_discovery(self, name: str) -> None:
+        base = self._resource_topic("docker", name)
+        unique_prefix = self._docker_unique_prefix(name)
         display_name = f"Docker: {name}"
         availability_topic = self._availability_topic()
         device = self._device_payload()

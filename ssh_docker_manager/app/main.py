@@ -123,12 +123,22 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
 
         await mqtt.publish_availability(True)
 
+        known_containers: set[str] = set()
         if docker_mgr:
+            containers = {}
             for c in await docker_mgr.list_containers():
                 info = await c.show()
-                name = info["Name"].lstrip("/")
-                await mqtt.publish_docker_discovery(c.id, name)
-                await mqtt.publish_state("docker", c.id, info["State"]["Status"])
+                containers[info["Name"].lstrip("/")] = info["State"]["Status"]
+            stale = await mqtt.prune_docker_discovery(list(containers))
+            if stale:
+                log.info("[%s] Removed %d stale Docker discovery configs", host, len(stale))
+                # Let HA drop the old entities first, so the new ones get the
+                # plain entity_ids instead of a _2 suffix.
+                await asyncio.sleep(2)
+            for name, status in containers.items():
+                await mqtt.publish_docker_discovery(name)
+                await mqtt.publish_state("docker", name, status)
+                known_containers.add(name)
 
         known_vms: set[str] = set()
         vm_state: dict[str, str] = {}
@@ -162,7 +172,9 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
             asyncio.create_task(conn.wait_closed()),
         ]
         if docker_mgr:
-            tasks.append(asyncio.create_task(_handle_docker_events(mqtt, docker_mgr)))
+            tasks.append(
+                asyncio.create_task(_handle_docker_events(mqtt, docker_mgr, known_containers))
+            )
         if libvirt_mgr:
             tasks.append(
                 asyncio.create_task(
@@ -200,15 +212,28 @@ async def run_server_session(server: dict, mqtt_conf: dict, discovery_prefix: st
         await mqtt.disconnect()
 
 
-async def _handle_docker_events(mqtt: MqttBridge, docker_mgr: DockerManager) -> None:
+# Container events that change State.Status (exec_*/health events don't).
+STATE_EVENTS = {"start", "die", "stop", "pause", "unpause"}
+
+
+async def _handle_docker_events(
+    mqtt: MqttBridge, docker_mgr: DockerManager, known_containers: set[str]
+) -> None:
     async for event in docker_mgr.events():
-        if event.get("Type") != "container":
+        if event.get("Type") != "container" or event.get("Action") not in STATE_EVENTS:
             continue
-        container_id = event.get("id") or event.get("Actor", {}).get("ID")
-        status = event.get("status")
-        if not container_id or not status:
+        name = event.get("Actor", {}).get("Attributes", {}).get("name")
+        if not name:
             continue
-        await mqtt.publish_state("docker", container_id, status)
+        # The event's own status ("start", "die", ...) isn't a container state;
+        # publish the real one ("running", "exited", ...) the switch expects.
+        status = await docker_mgr.status(name)
+        if status is None:
+            continue
+        if name not in known_containers:
+            await mqtt.publish_docker_discovery(name)
+            known_containers.add(name)
+        await mqtt.publish_state("docker", name, status)
 
 
 async def _poll_libvirt(
